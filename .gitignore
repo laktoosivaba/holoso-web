@@ -1,0 +1,9 @@
+# build artifact — built from holoso-synth (see README)
+wheels/*.whl
+
+# python bytecode
+__pycache__/
+*.pyc
+
+# node (spike harness)
+spike/node_modules/

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang=en>
+<meta charset=utf-8>
+<meta name=viewport content="width=device-width, initial-scale=1">
+<title>holoso — Python → Verilog</title>
+<style>
+:root {
+  --bd: #d4d4d4;
+  --bg: #fafafa;
+  --bg-alt: #f0f0f0;
+  --accent: #2a82e0;
+  --accent-hov: #1f6cb8;
+  --log-bg: #1e1e1e;
+  --log-fg: #d4d4d4;
+  --log-err: #ff6e6e;
+  --log-ok: #75d65f;
+  --log-dim: #888;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 12px 16px;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: white; color: #222;
+}
+header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+h1 { font-size: 1em; margin: 0; font-weight: 600; }
+header .sub { color: #888; font-size: 0.85em; }
+.pane { border: 1px solid var(--bd); border-radius: 4px; margin-bottom: 8px; overflow: hidden; background: white; }
+.pane > h2 {
+  font-size: 0.8em; margin: 0; padding: 5px 10px;
+  background: var(--bg); border-bottom: 1px solid var(--bd);
+  font-weight: 600; color: #555; display: flex; align-items: center; gap: 6px;
+}
+.pane > h2 .grow { flex: 1; }
+.editor { height: 320px; }
+.editor.short { height: 260px; }
+button {
+  padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
+  border: 1px solid #999; background: white; color: #222; border-radius: 3px;
+}
+button:hover:not(:disabled) { background: var(--bg-alt); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+button.primary:hover:not(:disabled) { background: var(--accent-hov); border-color: var(--accent-hov); }
+.tabs {
+  display: flex; padding: 4px 8px; gap: 4px; background: var(--bg);
+  border-bottom: 1px solid var(--bd); min-height: 32px; align-items: center;
+}
+.tabs:empty::before { content: "no output yet"; color: #999; font-style: italic; }
+.tabs button { padding: 3px 9px; font-size: 0.8em; }
+.tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
+.controls { display: flex; gap: 14px; align-items: center; margin: 10px 4px; flex-wrap: wrap; }
+.controls label { display: flex; align-items: center; gap: 5px; }
+.controls input[type=number] {
+  width: 4.5em; padding: 4px 6px; font: inherit; font-size: 0.9em;
+  border: 1px solid #999; border-radius: 3px;
+}
+select {
+  padding: 3px 6px; font: inherit; font-size: 0.8em;
+  border: 1px solid #999; background: white; color: #222; border-radius: 3px;
+}
+#log {
+  height: 150px; margin: 0; padding: 8px 10px;
+  background: var(--log-bg); color: var(--log-fg); font-size: 0.8em;
+  overflow: auto; white-space: pre-wrap; word-break: break-word;
+}
+#log .err { color: var(--log-err); }
+#log .ok  { color: var(--log-ok); }
+#log .dim { color: var(--log-dim); }
+</style>
+
+<header>
+  <h1>holoso</h1>
+  <span class=sub>Python&nbsp;→&nbsp;Verilog · synthesized in your browser (Pyodide)</span>
+</header>
+
+<div class=pane>
+  <h2>
+    <span>src.py</span>
+    <span class=grow></span>
+    <label>entry
+      <select id=entry title="which function to synthesize (auto = last defined)">
+        <option value="">(auto)</option>
+      </select>
+    </label>
+    <span class=sub id=engine>starting engine…</span>
+  </h2>
+  <div id=src-editor class=editor></div>
+</div>
+
+<div class=controls>
+  <label>wexp <input id=wexp type=number value=8 min=2 max=15 step=1></label>
+  <label>wman <input id=wman type=number value=24 min=4 max=52 step=1></label>
+  <button id=synth class=primary disabled>Synthesize</button>
+</div>
+
+<div class=pane>
+  <div class=tabs id=out-tabs></div>
+  <div id=out-editor class="editor short"></div>
+  <h2>
+    <span>output</span>
+    <span class=grow></span>
+    <button id=download disabled>Download</button>
+  </h2>
+</div>
+
+<div class=pane>
+  <h2>log</h2>
+  <pre id=log></pre>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ace.min.js"></script>
+<script type="module" src="app.js"></script>
