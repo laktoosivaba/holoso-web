@@ -29,8 +29,14 @@ h1 { font-size: 1em; margin: 0; font-weight: 600; }
 header .sub { color: #888; font-size: 0.85em; }
 .pane { border: 1px solid var(--bd); border-radius: 4px; margin: 0; overflow: hidden; background: white; flex: 0 0 auto; }
 .pane.fill { display: flex; flex-direction: column; min-height: 0; }
-#output-pane { flex: 3 1 0; }
-#resources-pane { flex: 2 1 0; }
+#output-pane { flex: 1 1 0; }
+#src-pane { flex: 1 1 0; }
+.maintabs { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+.maintabs .grow { flex: 1; }
+.maintabs button { font-size: 0.9em; }
+.maintabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
+.view { display: none; }
+.view.active { display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-height: 0; }
 .pane.fill > h2, .pane.fill > .tabs { flex: 0 0 auto; }
 .pane > h2 {
   font-size: 0.8em; margin: 0; padding: 5px 10px;
@@ -38,9 +44,13 @@ header .sub { color: #888; font-size: 0.85em; }
   font-weight: 600; color: #555; display: flex; align-items: center; gap: 6px;
 }
 .pane > h2 .grow { flex: 1; }
-.editor { height: 220px; }
-#out-editor, #out-frame { flex: 1 1 0; height: auto; min-height: 0; }
+#src-editor, #out-editor, #out-frame, #out-resources { flex: 1 1 0; height: auto; min-height: 0; }
 #out-frame { width: 100%; border: 0; background: white; display: none; }
+#out-resources { display: none; flex-direction: column; }
+.restoolbar {
+  display: flex; gap: 10px; align-items: center; padding: 6px 10px; flex: 0 0 auto;
+  background: var(--bg); border-bottom: 1px solid var(--bd);
+}
 #resources { flex: 1 1 0; min-height: 0; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
@@ -57,7 +67,7 @@ button.primary:hover:not(:disabled) { background: var(--accent-hov); border-colo
 .tabs:empty::before { content: "no output yet"; color: #999; font-style: italic; }
 .tabs button { padding: 3px 9px; font-size: 0.8em; }
 .tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
-.controls { display: flex; gap: 14px; align-items: center; margin: 10px 4px; flex-wrap: wrap; }
+.controls { display: flex; gap: 14px; align-items: center; margin: 0 4px; flex-wrap: wrap; flex: 0 0 auto; }
 .controls label { display: flex; align-items: center; gap: 5px; }
 .controls input[type=number] {
   width: 4.5em; padding: 4px 6px; font: inherit; font-size: 0.9em;
@@ -93,59 +103,65 @@ select {
   <span class=sub>Python&nbsp;→&nbsp;Verilog · synthesized in your browser (Pyodide)</span>
 </header>
 
-<div class=pane>
-  <h2>
-    <span>src.py</span>
-    <span class=grow></span>
-    <label>example
-      <select id=example title="load a demo kernel into the editor"></select>
-    </label>
-    <label>entry
-      <select id=entry title="which function to synthesize (auto = last defined)">
-        <option value="">(auto)</option>
-      </select>
-    </label>
-    <span class=sub id=engine>starting engine…</span>
-  </h2>
-  <div id=src-editor class=editor></div>
+<nav class=maintabs id=main-tabs>
+  <button id=tab-input class=active>Python input</button>
+  <button id=tab-output>Output &amp; resources</button>
+  <span class=grow></span>
+  <span class=sub id=engine>starting engine…</span>
+</nav>
+
+<div class="view active" id=view-input>
+  <div class="pane fill" id=src-pane>
+    <h2>
+      <span>src.py</span>
+      <span class=grow></span>
+      <label>example
+        <select id=example title="load a demo kernel into the editor"></select>
+      </label>
+      <label>entry
+        <select id=entry title="which function to synthesize (auto = last defined)">
+          <option value="">(auto)</option>
+        </select>
+      </label>
+    </h2>
+    <div id=src-editor class=editor></div>
+  </div>
+  <div class=controls>
+    <label>wexp <input id=wexp type=number value=8 min=2 max=15 step=1></label>
+    <label>wman <input id=wman type=number value=24 min=4 max=52 step=1></label>
+    <button id=synth class=primary disabled>Synthesize</button>
+  </div>
 </div>
 
-<div class=controls>
-  <label>wexp <input id=wexp type=number value=8 min=2 max=15 step=1></label>
-  <label>wman <input id=wman type=number value=24 min=4 max=52 step=1></label>
-  <button id=synth class=primary disabled>Synthesize</button>
+<div class=view id=view-output>
+  <div class="pane fill" id=output-pane>
+    <div class=tabs id=out-tabs></div>
+    <div id=out-editor class="editor short"></div>
+    <iframe id=out-frame class="editor short" sandbox="allow-scripts" title="synthesis report"></iframe>
+    <div id=out-resources>
+      <div class=restoolbar>
+        <label>target
+          <select id=arch title="synthesis target for the resource estimate">
+            <option value=generic>generic (gates)</option>
+            <option value=ecp5>Lattice ECP5</option>
+            <option value=xilinx>Xilinx 7-series</option>
+            <option value=ice40>Lattice iCE40</option>
+          </select>
+        </label>
+        <button id=estimate disabled title="run Yosys in your browser on the generated Verilog (downloads ~50 MB on first use)">Estimate</button>
+      </div>
+      <div id=resources class=resbody><span class=dim>synthesize a kernel, then estimate gate/FPGA resources</span></div>
+    </div>
+    <h2>
+      <span>output</span>
+      <span class=grow></span>
+      <button id=download disabled>Download</button>
+      <button id=download-all disabled title="all generated files + the Kulibin support RTL, as one .tar.gz">Download bundle</button>
+    </h2>
+  </div>
 </div>
 
-<div class="pane fill" id=output-pane>
-  <div class=tabs id=out-tabs></div>
-  <div id=out-editor class="editor short"></div>
-  <iframe id=out-frame class="editor short" sandbox="allow-scripts" title="synthesis report"></iframe>
-  <h2>
-    <span>output</span>
-    <span class=grow></span>
-    <button id=download disabled>Download</button>
-    <button id=download-all disabled title="all generated files + the Kulibin support RTL, as one .tar.gz">Download bundle</button>
-  </h2>
-</div>
-
-<div class="pane fill" id=resources-pane>
-  <h2>
-    <span>resources</span>
-    <span class=grow></span>
-    <label>target
-      <select id=arch title="synthesis target for the resource estimate">
-        <option value=generic>generic (gates)</option>
-        <option value=ecp5>Lattice ECP5</option>
-        <option value=xilinx>Xilinx 7-series</option>
-        <option value=ice40>Lattice iCE40</option>
-      </select>
-    </label>
-    <button id=estimate disabled title="run Yosys in your browser on the generated Verilog (downloads ~50 MB on first use)">Estimate</button>
-  </h2>
-  <div id=resources class=resbody><span class=dim>synthesize a kernel, then estimate gate/FPGA resources</span></div>
-</div>
-
-<div class=pane>
+<div class=pane id=log-pane>
   <h2>log</h2>
   <pre id=log></pre>
 </div>

@@ -30,16 +30,34 @@ const out = ace.edit("out-editor");
 out.setOptions({ fontFamily: "inherit", fontSize: 12, showPrintMargin: false, readOnly: true });
 const outEl = $("out-editor");
 const frame = $("out-frame");
+const resEl = $("out-resources");
 
 // The editors now flex to fill their panes, so keep Ace's internal size in sync with the viewport.
 window.addEventListener("resize", () => { ed.resize(); out.resize(); });
+
+// Top-level views: "input" (editor + format controls) and "output" (generated files + resource estimate).
+const views = { input: $("view-input"), output: $("view-output") };
+const tabBtns = { input: $("tab-input"), output: $("tab-output") };
+
+function switchView(name) {
+  if (!views[name]) return;
+  for (const k of Object.keys(views)) {
+    views[k].classList.toggle("active", k === name);
+    tabBtns[k].classList.toggle("active", k === name);
+  }
+  // Ace lays out at zero size while its container is display:none, so resize the one we just revealed.
+  (name === "input" ? ed : out).resize();
+}
+$("tab-input").onclick = () => switchView("input");
+$("tab-output").onclick = () => switchView("output");
 
 let files = [];
 let active = 0;
 let lastResult = null;
 
-function showText() { outEl.style.display = ""; frame.style.display = "none"; }
-function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; }
+function showText() { outEl.style.display = ""; frame.style.display = "none"; resEl.style.display = "none"; }
+function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; resEl.style.display = "none"; }
+function showResources() { outEl.style.display = "none"; frame.style.display = "none"; resEl.style.display = "flex"; }
 
 function clearOutput() {
   files = [];
@@ -70,6 +88,14 @@ function selectTab(i) {
   renderTabs();
 }
 
+// "resources" is a pseudo-tab (active === "res"): not a generated file, so it isn't in `files` and isn't
+// downloadable — it just reveals the Yosys estimate UI in the same content area.
+function selectResources() {
+  active = "res";
+  showResources();
+  renderTabs();
+}
+
 function renderTabs() {
   const host = $("out-tabs");
   host.innerHTML = "";
@@ -80,7 +106,16 @@ function renderTabs() {
     b.onclick = () => selectTab(i);
     host.appendChild(b);
   });
-  $("download").disabled = files.length === 0;
+  if (files.length) {
+    const rb = document.createElement("button");
+    rb.textContent = "resources";
+    rb.title = "in-browser Yosys resource estimate";
+    if (active === "res") rb.classList.add("active");
+    rb.onclick = () => selectResources();
+    host.appendChild(rb);
+  }
+  const onFile = typeof active === "number" && !!files[active];
+  $("download").disabled = !onFile;
   $("download-all").disabled = files.length === 0;
 }
 
@@ -184,6 +219,10 @@ function onResult(jsonStr) {
       "ok"
     );
   } else {
+    // Synthesis failed: go back to the input view so the source annotation / cursor jump is visible.
+    switchView("input");
+    showText();
+    out.setValue(PLACEHOLDER, -1);
     reportError(r.error || {});
   }
 }
@@ -223,6 +262,12 @@ $("synth").onclick = () => {
   };
   logMsg(`POST synth (wexp=${req.wexp} wman=${req.wman}${req.entry ? " entry=" + req.entry : ""})`);
   worker.postMessage(req);
+
+  // The output view is where results land — jump there now and show progress; onResult fills it (or bounces
+  // back to the input view on error).
+  switchView("output");
+  out.setValue("// synthesizing…", -1);
+  out.resize();
 };
 
 function triggerDownload(name, blob) {
