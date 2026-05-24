@@ -35,7 +35,7 @@ let files = [];
 let active = 0;
 
 function showText() { outEl.style.display = ""; frame.style.display = "none"; }
-function showFrame() { outEl.style.display = "none"; frame.style.display = ""; }
+function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; }
 
 function clearOutput() {
   files = [];
