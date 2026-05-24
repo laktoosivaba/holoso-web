@@ -16,7 +16,9 @@ async function init() {
   await py.loadPackage(["micropip", "numpy", "sympy"]);
 
   status("installing holoso…");
-  const bytes = new Uint8Array(await (await fetch(WHEEL_URL)).arrayBuffer());
+  // cache: "reload" forces a network fetch, bypassing any stale HTTP-cache entry. The wheel keeps a fixed
+  // filename across deploys, so a browser that once cached it as immutable would otherwise pin an old build.
+  const bytes = new Uint8Array(await (await fetch(WHEEL_URL, { cache: "reload" })).arrayBuffer());
   const fname = WHEEL_URL.split("/").pop();
   py.FS.writeFile("/" + fname, bytes);
   await py.runPythonAsync(`import micropip; await micropip.install("emfs:/${fname}", deps=False)`);
