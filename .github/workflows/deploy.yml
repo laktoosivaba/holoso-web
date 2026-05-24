@@ -1,0 +1,23 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: ${{ vars.KUBECTL_VERSION }}
+
+      - name: Rollout restart
+        run: kubectl -n holoso rollout restart deploy/holoso-web
+
+      - name: Wait for rollout
+        run: kubectl -n holoso rollout status deploy/holoso-web --timeout=120s
+
+      - name: Show pod state
+        run: |
+          kubectl -n holoso get pods -l app=holoso-web \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[?(@.name=="holoso-web")].image}{"\t"}{.status.containerStatuses[?(@.name=="holoso-web")].ready}{"\n"}{end}'

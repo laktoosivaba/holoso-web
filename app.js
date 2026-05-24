@@ -1,14 +1,8 @@
-// UI controller for holoso-web. Owns the editors, controls, output tabs and log; talks to worker.js over postMessage.
-// All synthesis happens in the worker (Pyodide); this file never touches Python.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-
-const DEFAULT_SRC = `def dot2(a, b, c, d):
-    ab = a * b
-    cd = c * d
-    return ab + cd
-`;
+const PLACEHOLDER = "// run Synthesize to populate";
+const BOOT_HINT = "# loading demo kernels — the engine is still starting…\n";
 
 function logMsg(msg, cls) {
   const ts = new Date().toTimeString().slice(0, 8);
@@ -22,15 +16,51 @@ function logMsg(msg, cls) {
 const ed = ace.edit("src-editor");
 ed.session.setMode("ace/mode/python");
 ed.setOptions({ fontFamily: "inherit", fontSize: 12, showPrintMargin: false, useSoftTabs: true, tabSize: 4 });
-ed.setValue(DEFAULT_SRC, -1);
+
+let editorTouched = false;
+function setEditor(text) {
+  ed.setValue(text, -1);
+  editorTouched = false;
+}
+ed.on("change", () => {
+  editorTouched = true;
+});
 
 const out = ace.edit("out-editor");
-out.session.setMode("ace/mode/verilog");
 out.setOptions({ fontFamily: "inherit", fontSize: 12, showPrintMargin: false, readOnly: true });
-out.setValue("// run Synthesize to populate", -1);
+const outEl = $("out-editor");
+const frame = $("out-frame");
 
-let files = []; // [{name, content}]
+let files = [];
 let active = 0;
+
+function showText() { outEl.style.display = ""; frame.style.display = "none"; }
+function showFrame() { outEl.style.display = "none"; frame.style.display = ""; }
+
+function clearOutput() {
+  files = [];
+  active = 0;
+  $("out-tabs").innerHTML = "";
+  showText();
+  out.setValue(PLACEHOLDER, -1);
+  frame.removeAttribute("srcdoc");
+  $("download").disabled = true;
+}
+
+function selectTab(i) {
+  active = i;
+  const f = files[i];
+  if (f.kind === "html") {
+    showFrame();
+    frame.srcdoc = f.content;
+  } else {
+    showText();
+    out.session.setMode("ace/mode/" + (f.mode || "text"));
+    out.setValue(f.content, -1);
+    out.resize();
+  }
+  renderTabs();
+}
 
 function renderTabs() {
   const host = $("out-tabs");
@@ -39,18 +69,12 @@ function renderTabs() {
     const b = document.createElement("button");
     b.textContent = f.name;
     if (i === active) b.classList.add("active");
-    b.onclick = () => {
-      active = i;
-      out.setValue(files[i].content, -1);
-      renderTabs();
-    };
+    b.onclick = () => selectTab(i);
     host.appendChild(b);
   });
   $("download").disabled = files.length === 0;
 }
 
-// The entry picker is populated from the candidate functions the worker reports; "(auto)" lets the driver pick the
-// last-defined function. Keep the current selection if it survives a re-parse.
 function setEntryOptions(targets, chosen) {
   const sel = $("entry");
   const want = chosen || sel.value;
@@ -63,6 +87,31 @@ function setEntryOptions(targets, chosen) {
   }
   sel.value = (targets || []).includes(want) ? want : "";
 }
+
+let examples = [];
+
+function populatePicker() {
+  const sel = $("example");
+  sel.innerHTML = "";
+  for (const ex of examples) {
+    const o = document.createElement("option");
+    o.value = ex.id;
+    o.textContent = ex.label;
+    sel.appendChild(o);
+  }
+}
+
+function loadExample(id) {
+  const ex = examples.find((e) => e.id === id) || examples[0];
+  if (!ex) return;
+  setEditor(ex.source);
+  ed.session.clearAnnotations();
+  ed.focus();
+  $("example").value = ex.id;
+  setEntryOptions([], "");
+  clearOutput();
+}
+$("example").onchange = () => loadExample($("example").value);
 
 const worker = new Worker("worker.js");
 let ready = false;
@@ -77,8 +126,12 @@ worker.onmessage = (e) => {
       break;
     case "ready":
       ready = true;
+      examples = m.examples || [];
+      populatePicker();
+      if (!editorTouched && examples.length) loadExample(examples[0].id);
       $("engine").textContent = m.versions;
       logMsg("engine ready · " + m.versions, "ok");
+      logMsg(`${examples.length} demo kernels loaded from the wheel`, "dim");
       $("synth").disabled = false;
       break;
     case "fatal":
@@ -104,29 +157,39 @@ function onResult(jsonStr) {
   if (r.targets) setEntryOptions(r.targets, r.target);
 
   if (r.ok) {
+    const mod = r.module_name;
     files = [
-      { name: r.module_name + ".v", content: r.verilog },
-      { name: "holoso_support.v", content: r.support },
+      { name: mod + ".v", content: r.verilog, kind: "text", mode: "verilog" },
+      { name: "holoso_support.v", content: r.support, kind: "text", mode: "verilog" },
+      { name: "test_" + mod + ".py", content: r.testbench, kind: "text", mode: "python" },
+      { name: mod + ".html", content: r.report_html, kind: "html" },
     ];
-    active = 0;
-    out.setValue(files[0].content, -1);
-    renderTabs();
+    selectTab(0);
     const mt = r.metrics || {};
     logMsg(
-      `synthesized ${r.target} → ${r.module_name}.v · ${mt.operator_instances} · ${mt.float_regs} float regs · ` +
+      `synthesized ${r.target} → ${mod}.v · ${mt.operator_instances} · ${mt.float_regs} float regs · ` +
         `${mt.steps} steps · II≈${mt.ii_estimate} · chain ${mt.max_chain_len}`,
       "ok"
     );
   } else {
-    const err = r.error || {};
-    const tail = (err.message || "").split("\n").filter(Boolean).pop() || "synthesis failed";
-    logMsg(`${err.kind || "error"}: ${tail}`, "err");
-    if (err.location) {
-      const row = (err.location.lineno || 1) - 1;
-      ed.session.setAnnotations([{ row, column: err.location.col || 0, text: err.message || tail, type: "error" }]);
-      ed.gotoLine(row + 1, err.location.col || 0, true);
-      ed.focus();
-    }
+    reportError(r.error || {});
+  }
+}
+
+function reportError(err) {
+  const lines = (err.message || "").split("\n").filter(Boolean);
+  const tail = lines[lines.length - 1] || "synthesis failed";
+  logMsg(`${err.kind || "error"}: ${tail}`, "err");
+
+  const loc = err.location;
+  if (loc) {
+    const row = (loc.lineno || 1) - 1;
+    ed.session.setAnnotations([{ row, column: loc.col || 0, text: err.message || tail, type: "error" }]);
+    if (loc.line) logMsg(`  L${loc.lineno}: ${String(loc.line).trim()}`, "dim");
+    ed.gotoLine(row + 1, loc.col || 0, true);
+    ed.focus();
+  } else if (err.kind === "InternalError") {
+    logMsg(err.message, "dim");
   }
 }
 
@@ -136,11 +199,7 @@ $("synth").onclick = () => {
     return;
   }
   $("synth").disabled = true;
-  $("download").disabled = true;
-  files = [];
-  active = 0;
-  $("out-tabs").innerHTML = "";
-  out.setValue("", -1);
+  clearOutput();
 
   const req = {
     type: "synth",
@@ -157,7 +216,7 @@ $("synth").onclick = () => {
 $("download").onclick = () => {
   const f = files[active];
   if (!f) return;
-  const blob = new Blob([f.content], { type: "text/plain" });
+  const blob = new Blob([f.content], { type: f.kind === "html" ? "text/html" : "text/plain" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = f.name;
@@ -167,7 +226,8 @@ $("download").onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
-// Boot the engine immediately; the first load pulls Pyodide + numpy + sympy (tens of MB), so warn in the log.
+setEditor(BOOT_HINT);
+clearOutput();
 $("synth").disabled = true;
 $("engine").textContent = "starting engine…";
 logMsg("booting Pyodide engine — first load downloads the runtime + numpy + sympy (tens of MB)…", "dim");

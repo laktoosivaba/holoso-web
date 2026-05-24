@@ -1,0 +1,16 @@
+{
+  "name": "holoso-web-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node tooling for holoso-web: headless driver regression test + Pyodide vendoring (offline self-host).",
+  "scripts": {
+    "test": "node driver_test.mjs",
+    "vendor": "node vendor-pyodide.mjs",
+    "vendor:check": "node vendor-check.mjs"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "pyodide": "^0.29.4"
+  }
+}

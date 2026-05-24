@@ -1,0 +1,9 @@
+# The image build runs `make dist` from clean inputs, so keep host-built artifacts and dev cruft out of the context.
+.git
+.github
+dist/
+pyodide/
+wheels/
+tools/node_modules/
+**/__pycache__/
+*.pyc

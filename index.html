@@ -34,6 +34,7 @@ header .sub { color: #888; font-size: 0.85em; }
 .pane > h2 .grow { flex: 1; }
 .editor { height: 320px; }
 .editor.short { height: 260px; }
+#out-frame { width: 100%; border: 0; background: white; display: none; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
   border: 1px solid #999; background: white; color: #222; border-radius: 3px;
@@ -78,6 +79,9 @@ select {
   <h2>
     <span>src.py</span>
     <span class=grow></span>
+    <label>example
+      <select id=example title="load a demo kernel into the editor"></select>
+    </label>
     <label>entry
       <select id=entry title="which function to synthesize (auto = last defined)">
         <option value="">(auto)</option>
@@ -97,6 +101,7 @@ select {
 <div class=pane>
   <div class=tabs id=out-tabs></div>
   <div id=out-editor class="editor short"></div>
+  <iframe id=out-frame class="editor short" sandbox="allow-scripts" title="synthesis report"></iframe>
   <h2>
     <span>output</span>
     <span class=grow></span>

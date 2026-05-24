@@ -3,7 +3,7 @@
 Defines ``synth_to_json``: take the user's Python source as text, materialize it as a real module on the (in-memory)
 filesystem so ``inspect.getsource`` works, locate the target function, run ``holoso.synthesize``, and return a
 JSON string the JS layer renders. Pure data in, JSON out -- no DOM, no globals beyond a per-call module counter --
-so it is exercised identically by ``worker.js`` (browser) and ``spike/`` (Node), the single source of synth logic.
+so it is exercised identically by ``worker.js`` (browser) and ``tools/`` (Node), the single source of synth logic.
 
 A unique module name per call (``holoso_user_<n>``) gives every run a distinct ``__file__`` -> linecache stays
 correct across edits, and importlib never serves a stale cached module.
@@ -35,6 +35,26 @@ def _error(kind: str, message: str, **extra: object) -> str:
     return json.dumps({"ok": False, "error": {"kind": kind, "message": message}, **extra})
 
 
+def demos_to_json() -> str:
+    """Return the wheel-bundled demo kernels (id, label, verbatim source) as a JSON array for the example picker."""
+    from holoso.demos import load_demos
+
+    return json.dumps([{"id": d.id, "label": d.label, "source": d.source} for d in load_demos()])
+
+
+def _user_location(user_file: pathlib.Path) -> dict[str, object] | None:
+    """Pull the last traceback frame inside the user's module file, so an import-time crash annotates the right line."""
+    import linecache
+
+    frames = traceback.extract_tb(sys.exc_info()[2])
+    hits = [f for f in frames if f.filename == str(user_file)]
+    if not hits:
+        return None
+    frame = hits[-1]
+    line = frame.line or linecache.getline(str(user_file), frame.lineno or 0)
+    return {"lineno": frame.lineno, "col": 0, "line": line.rstrip("\n")}
+
+
 def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str = "") -> str:
     """Synthesize ``source`` and return a JSON result envelope (see module docstring)."""
     from holoso import FloatFormat, synthesize
@@ -44,15 +64,20 @@ def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str 
     _counter += 1
     mod_name = f"holoso_user_{_counter}"
     _USER_DIR.mkdir(exist_ok=True)
-    (_USER_DIR / f"{mod_name}.py").write_text(source, encoding="utf-8")
+    user_file = _USER_DIR / f"{mod_name}.py"
+    user_file.write_text(source, encoding="utf-8")
     if str(_USER_DIR) not in sys.path:
         sys.path.insert(0, str(_USER_DIR))
     importlib.invalidate_caches()
 
     try:
         module = importlib.import_module(mod_name)
-    except Exception:  # the user's own module body raised -- surface it verbatim
-        return _error("ImportError", traceback.format_exc())
+    except Exception:
+        err: dict[str, object] = {"kind": "ImportError", "message": traceback.format_exc()}
+        loc = _user_location(user_file)
+        if loc is not None:
+            err["location"] = loc
+        return json.dumps({"ok": False, "error": err, "targets": []})
 
     candidates = _module_functions(module)
     target_name = entry.strip() or (candidates[-1] if candidates else "")
@@ -73,7 +98,7 @@ def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str 
         if loc is not None:
             err["location"] = {"lineno": loc.lineno, "col": loc.col, "line": loc.line}
         return json.dumps({"ok": False, "error": err, "targets": candidates, "target": target_name})
-    except Exception:  # a bug in holoso, not in the user's input -- show the full trace
+    except Exception:
         return json.dumps(
             {"ok": False, "error": {"kind": "InternalError", "message": traceback.format_exc()}, "targets": candidates}
         )
