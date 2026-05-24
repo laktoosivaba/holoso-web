@@ -106,15 +106,16 @@ function renderTabs() {
     if (i === active) b.classList.add("active");
     b.onclick = () => selectTab(i);
     host.appendChild(b);
+    // Slot the "resources" pseudo-tab right after the report (files[0]), before the source files.
+    if (i === 0) {
+      const rb = document.createElement("button");
+      rb.textContent = "resources";
+      rb.title = "in-browser Yosys estimate / ECP5 place-and-route";
+      if (active === "res") rb.classList.add("active");
+      rb.onclick = () => selectResources();
+      host.appendChild(rb);
+    }
   });
-  if (files.length) {
-    const rb = document.createElement("button");
-    rb.textContent = "resources";
-    rb.title = "in-browser Yosys resource estimate";
-    if (active === "res") rb.classList.add("active");
-    rb.onclick = () => selectResources();
-    host.appendChild(rb);
-  }
   const onFile = typeof active === "number" && !!files[active];
   $("download").disabled = !onFile;
   $("download-all").disabled = files.length === 0;
@@ -203,12 +204,14 @@ function onResult(jsonStr) {
 
   if (r.ok) {
     const mod = r.module_name;
+    // Report first (the default tab — it's the most useful view), then the .v/.vh/testbench sources.
+    // The "resources" pseudo-tab is slotted between them in renderTabs().
     files = [
+      { name: mod + ".html", content: r.report_html, kind: "html" },
       { name: mod + ".v", content: r.verilog, kind: "text", mode: "verilog" },
       { name: "holoso_support.v", content: r.support, kind: "text", mode: "verilog" },
       { name: "holoso_support.vh", content: r.support_header, kind: "text", mode: "verilog" },
       { name: "test_" + mod + ".py", content: r.testbench, kind: "text", mode: "python" },
-      { name: mod + ".html", content: r.report_html, kind: "html" },
     ];
     lastResult = { top: mod, verilog: r.verilog, support: r.support, supportHeader: r.support_header };
     $("estimate").disabled = false;
