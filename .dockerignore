@@ -3,6 +3,8 @@
 .github
 dist/
 pyodide/
+yosys/
+hdl/
 wheels/
 tools/node_modules/
 **/__pycache__/

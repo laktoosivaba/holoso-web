@@ -18,23 +18,30 @@
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; padding: 12px 16px;
+  margin: 0; padding: 10px 14px;
   font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: white; color: #222;
+  display: flex; flex-direction: column; gap: 8px;
+  height: 100dvh; overflow: hidden;
 }
-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+header { display: flex; align-items: baseline; gap: 12px; margin: 0; }
 h1 { font-size: 1em; margin: 0; font-weight: 600; }
 header .sub { color: #888; font-size: 0.85em; }
-.pane { border: 1px solid var(--bd); border-radius: 4px; margin-bottom: 8px; overflow: hidden; background: white; }
+.pane { border: 1px solid var(--bd); border-radius: 4px; margin: 0; overflow: hidden; background: white; flex: 0 0 auto; }
+.pane.fill { display: flex; flex-direction: column; min-height: 0; }
+#output-pane { flex: 3 1 0; }
+#resources-pane { flex: 2 1 0; }
+.pane.fill > h2, .pane.fill > .tabs { flex: 0 0 auto; }
 .pane > h2 {
   font-size: 0.8em; margin: 0; padding: 5px 10px;
   background: var(--bg); border-bottom: 1px solid var(--bd);
   font-weight: 600; color: #555; display: flex; align-items: center; gap: 6px;
 }
 .pane > h2 .grow { flex: 1; }
-.editor { height: 320px; }
-.editor.short { height: 260px; }
+.editor { height: 220px; }
+#out-editor, #out-frame { flex: 1 1 0; height: auto; min-height: 0; }
 #out-frame { width: 100%; border: 0; background: white; display: none; }
+#resources { flex: 1 1 0; min-height: 0; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
   border: 1px solid #999; background: white; color: #222; border-radius: 3px;
@@ -61,13 +68,24 @@ select {
   border: 1px solid #999; background: white; color: #222; border-radius: 3px;
 }
 #log {
-  height: 150px; margin: 0; padding: 8px 10px;
+  height: 120px; margin: 0; padding: 8px 10px;
   background: var(--log-bg); color: var(--log-fg); font-size: 0.8em;
   overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
 #log .err { color: var(--log-err); }
 #log .ok  { color: var(--log-ok); }
 #log .dim { color: var(--log-dim); }
+.resbody { padding: 8px 10px; font-size: 0.85em; overflow: auto; }
+.resbody .dim { color: #999; }
+.resbody .err { color: #c0392b; white-space: pre-wrap; }
+.resbody .head { margin-bottom: 6px; }
+.resbody .head b { font-size: 1.2em; }
+.resbody .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.resbody .chip { padding: 2px 8px; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg); }
+.resbody table { border-collapse: collapse; margin-top: 4px; }
+.resbody td { padding: 1px 12px 1px 0; }
+.resbody td.n { text-align: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+.resbody .warn { color: #b7791f; margin-top: 6px; white-space: pre-wrap; }
 </style>
 
 <header>
@@ -98,7 +116,7 @@ select {
   <button id=synth class=primary disabled>Synthesize</button>
 </div>
 
-<div class=pane>
+<div class="pane fill" id=output-pane>
   <div class=tabs id=out-tabs></div>
   <div id=out-editor class="editor short"></div>
   <iframe id=out-frame class="editor short" sandbox="allow-scripts" title="synthesis report"></iframe>
@@ -106,7 +124,25 @@ select {
     <span>output</span>
     <span class=grow></span>
     <button id=download disabled>Download</button>
+    <button id=download-all disabled title="all generated files + the Kulibin support RTL, as one .tar.gz">Download bundle</button>
   </h2>
+</div>
+
+<div class="pane fill" id=resources-pane>
+  <h2>
+    <span>resources</span>
+    <span class=grow></span>
+    <label>target
+      <select id=arch title="synthesis target for the resource estimate">
+        <option value=generic>generic (gates)</option>
+        <option value=ecp5>Lattice ECP5</option>
+        <option value=xilinx>Xilinx 7-series</option>
+        <option value=ice40>Lattice iCE40</option>
+      </select>
+    </label>
+    <button id=estimate disabled title="run Yosys in your browser on the generated Verilog (downloads ~50 MB on first use)">Estimate</button>
+  </h2>
+  <div id=resources class=resbody><span class=dim>synthesize a kernel, then estimate gate/FPGA resources</span></div>
 </div>
 
 <div class=pane>

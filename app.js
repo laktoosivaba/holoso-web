@@ -31,8 +31,12 @@ out.setOptions({ fontFamily: "inherit", fontSize: 12, showPrintMargin: false, re
 const outEl = $("out-editor");
 const frame = $("out-frame");
 
+// The editors now flex to fill their panes, so keep Ace's internal size in sync with the viewport.
+window.addEventListener("resize", () => { ed.resize(); out.resize(); });
+
 let files = [];
 let active = 0;
+let lastResult = null;
 
 function showText() { outEl.style.display = ""; frame.style.display = "none"; }
 function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; }
@@ -40,11 +44,15 @@ function showFrame() { outEl.style.display = "none"; frame.style.display = "bloc
 function clearOutput() {
   files = [];
   active = 0;
+  lastResult = null;
   $("out-tabs").innerHTML = "";
   showText();
   out.setValue(PLACEHOLDER, -1);
   frame.removeAttribute("srcdoc");
   $("download").disabled = true;
+  $("download-all").disabled = true;
+  $("estimate").disabled = true;
+  $("resources").innerHTML = '<span class="dim">synthesize a kernel, then estimate gate/FPGA resources</span>';
 }
 
 function selectTab(i) {
@@ -73,6 +81,7 @@ function renderTabs() {
     host.appendChild(b);
   });
   $("download").disabled = files.length === 0;
+  $("download-all").disabled = files.length === 0;
 }
 
 function setEntryOptions(targets, chosen) {
@@ -161,9 +170,12 @@ function onResult(jsonStr) {
     files = [
       { name: mod + ".v", content: r.verilog, kind: "text", mode: "verilog" },
       { name: "holoso_support.v", content: r.support, kind: "text", mode: "verilog" },
+      { name: "holoso_support.vh", content: r.support_header, kind: "text", mode: "verilog" },
       { name: "test_" + mod + ".py", content: r.testbench, kind: "text", mode: "python" },
       { name: mod + ".html", content: r.report_html, kind: "html" },
     ];
+    lastResult = { top: mod, verilog: r.verilog, support: r.support, supportHeader: r.support_header };
+    $("estimate").disabled = false;
     selectTab(0);
     const mt = r.metrics || {};
     logMsg(
@@ -213,17 +225,123 @@ $("synth").onclick = () => {
   worker.postMessage(req);
 };
 
-$("download").onclick = () => {
-  const f = files[active];
-  if (!f) return;
-  const blob = new Blob([f.content], { type: f.kind === "html" ? "text/html" : "text/plain" });
+function triggerDownload(name, blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = f.name;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(a.href);
+}
+
+$("download").onclick = () => {
+  const f = files[active];
+  if (!f) return;
+  triggerDownload(f.name, new Blob([f.content], { type: f.kind === "html" ? "text/html" : "text/plain" }));
+};
+
+// Bundle every output tab plus the Kulibin support RTL into one .tar.gz, so the download is a self-contained,
+// synthesizable source set rather than file-by-file. nanotar is imported lazily — only when this is used.
+$("download-all").onclick = async () => {
+  if (!files.length || !lastResult || $("download-all").disabled) return;
+  const btn = $("download-all");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "bundling…";
+  try {
+    const entries = files.map((f) => ({ name: f.name, data: f.content }));
+    const manifest = await (await fetch("hdl/kulibin/manifest.json")).json();
+    for (const n of manifest) {
+      entries.push({ name: "kulibin/float/hdl/" + n, data: await (await fetch("hdl/kulibin/" + n)).text() });
+    }
+    const { createTarGzip } = await import("./nanotar.js");
+    const gz = await createTarGzip(entries);
+    triggerDownload(`${lastResult.top}.tar.gz`, new Blob([gz], { type: "application/gzip" }));
+    logMsg(`bundled ${entries.length} files → ${lastResult.top}.tar.gz`, "ok");
+  } catch (e) {
+    logMsg("bundle failed: " + (e.message || e), "err");
+  } finally {
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+};
+
+const ARCH_LABEL = { generic: "generic gates", ecp5: "Lattice ECP5", xilinx: "Xilinx 7-series", ice40: "Lattice iCE40" };
+let yosysWorker = null;
+let estimateBusy = false;
+let yosysReady = false;
+
+const RES_HINT = '<span class="dim">synthesize a kernel, then estimate gate/FPGA resources</span>';
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+}
+
+function summarizeCells(counts) {
+  const sum = (re) => Object.entries(counts).reduce((a, [t, n]) => a + (re.test(t) ? n : 0), 0);
+  return { LUT: sum(/LUT/i), DSP: sum(/MULT|DSP|MAC/i), FF: sum(/(^|_)(FF|FD[RSCP]|DFF)/i), carry: sum(/CARRY|CCU|(^|_)CY/i), BRAM: sum(/BRAM|EBR|DP16|PDPW|RAM(?!P)/i) };
+}
+
+function renderResources(m) {
+  const s = summarizeCells(m.counts);
+  const chips = Object.entries(s).filter(([, n]) => n > 0).map(([k, n]) => `<span class=chip>${k} ${n}</span>`).join("");
+  const rows = Object.entries(m.counts).sort((a, b) => b[1] - a[1]).map(([t, n]) => `<tr><td class=n>${n}</td><td>${escapeHtml(t)}</td></tr>`).join("");
+  $("resources").innerHTML =
+    `<div class=head><b>${m.total}</b> cells · ${ARCH_LABEL[m.target]} · ${m.top} · ${m.libFiles.length} support modules</div>` +
+    (chips ? `<div class=chips>${chips}</div>` : "") +
+    `<table>${rows}</table>`;
+}
+
+function finishEstimate() {
+  estimateBusy = false;
+  $("estimate").disabled = !lastResult;
+}
+
+function ensureYosys() {
+  if (yosysWorker) return yosysWorker;
+  yosysWorker = new Worker("yosys-worker.js", { type: "module" });
+  yosysWorker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "progress") {
+      $("resources").innerHTML = `<span class=dim>loading yosys… ${((m.done / m.total) * 100).toFixed(0)}% of ${(m.total / 1048576).toFixed(0)} MB (cached after first load)</span>`;
+    } else if (m.type === "status") {
+      $("resources").innerHTML = `<span class=dim>${escapeHtml(m.msg)}</span>`;
+    } else if (m.type === "ready") {
+      yosysReady = true;
+      if (!estimateBusy) $("resources").innerHTML = RES_HINT;
+      logMsg("yosys engine ready", "ok");
+    } else if (m.type === "result") {
+      finishEstimate();
+      renderResources(m);
+      logMsg(`yosys ${m.target}: ${m.total} cells`, "ok");
+    } else if (m.type === "error") {
+      finishEstimate();
+      $("resources").innerHTML = `<div class=err>yosys failed:\n${escapeHtml(m.message)}</div>`;
+      logMsg("yosys estimate failed", "err");
+    }
+  };
+  yosysWorker.onerror = (e) => {
+    finishEstimate();
+    $("resources").innerHTML = `<div class=err>yosys worker error: ${escapeHtml(e.message || String(e))}</div>`;
+  };
+  return yosysWorker;
+}
+
+$("estimate").onclick = () => {
+  if (!lastResult || estimateBusy) return;
+  estimateBusy = true;
+  $("estimate").disabled = true;
+  $("resources").innerHTML = '<span class="dim">starting yosys…</span>';
+  ensureYosys().postMessage({
+    type: "estimate",
+    id: ++reqId,
+    top: lastResult.top,
+    verilog: lastResult.verilog,
+    support: lastResult.support,
+    supportHeader: lastResult.supportHeader,
+    target: $("arch").value,
+  });
 };
 
 setEditor(BOOT_HINT);
@@ -232,3 +350,4 @@ $("synth").disabled = true;
 $("engine").textContent = "starting engine…";
 logMsg("booting Pyodide engine — first load downloads the runtime + numpy + sympy (tens of MB)…", "dim");
 worker.postMessage({ type: "init" });
+ensureYosys(); // start downloading + warming yosys now so Estimate is instant later (~50 MB, cached after)
