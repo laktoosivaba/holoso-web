@@ -4,6 +4,7 @@
 dist/
 pyodide/
 yosys/
+nextpnr-ecp5/
 hdl/
 wheels/
 tools/node_modules/

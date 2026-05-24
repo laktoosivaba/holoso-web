@@ -8,6 +8,7 @@
     "test": "node driver_test.mjs",
     "test:closure": "node closure_test.mjs",
     "test:yosys": "node yosys-worker-test.mjs",
+    "test:nextpnr": "node nextpnr-worker-test.mjs",
     "vendor": "node vendor-pyodide.mjs",
     "vendor:check": "node vendor-check.mjs"
   },
@@ -16,6 +17,7 @@
     "pyodide": "^0.29.4"
   },
   "devDependencies": {
+    "@yowasp/nextpnr-ecp5": "^0.10.38-dev.709",
     "@yowasp/yosys": "^0.65.176-dev.1145"
   }
 }

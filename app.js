@@ -70,7 +70,8 @@ function clearOutput() {
   $("download").disabled = true;
   $("download-all").disabled = true;
   $("estimate").disabled = true;
-  $("resources").innerHTML = '<span class="dim">synthesize a kernel, then estimate gate/FPGA resources</span>';
+  $("route").disabled = true;
+  $("resources").innerHTML = RES_HINT;
 }
 
 function selectTab(i) {
@@ -211,6 +212,7 @@ function onResult(jsonStr) {
     ];
     lastResult = { top: mod, verilog: r.verilog, support: r.support, supportHeader: r.support_header };
     $("estimate").disabled = false;
+    $("route").disabled = false;
     selectTab(0);
     const mt = r.metrics || {};
     logMsg(
@@ -313,8 +315,32 @@ $("download-all").onclick = async () => {
 };
 
 const ARCH_LABEL = { generic: "generic gates", ecp5: "Lattice ECP5", xilinx: "Xilinx 7-series", ice40: "Lattice iCE40" };
+
+// Valid ECP5 die→package combinations (probed from nextpnr-ecp5; bad combos are rejected at route time).
+// Packages are ordered most-pads-first via PAD_RANK so the default selection maximizes available I/O pads.
+const ECP5_PKGS = {
+  "--12k": ["CABGA256", "CABGA381", "CSFBGA285", "TQFP144"],
+  "--25k": ["CABGA256", "CABGA381", "CSFBGA285", "TQFP144"],
+  "--45k": ["CABGA256", "CABGA381", "CABGA554", "CSFBGA285", "TQFP144"],
+  "--85k": ["CABGA381", "CABGA554", "CABGA756", "CSFBGA285"],
+};
+const PAD_RANK = { CABGA756: 6, CABGA554: 5, CABGA400: 4, CABGA381: 3, CABGA256: 2, CSFBGA285: 1, TQFP144: 0 };
+
+function populatePackages() {
+  const sel = $("ecp5-pkg");
+  const pkgs = (ECP5_PKGS[$("ecp5-die").value] || []).slice().sort((a, b) => (PAD_RANK[b] || 0) - (PAD_RANK[a] || 0));
+  sel.innerHTML = "";
+  for (const p of pkgs) {
+    const o = document.createElement("option");
+    o.value = o.textContent = p;
+    sel.appendChild(o);
+  }
+  sel.value = pkgs[0]; // always default to the most-pads package for the chosen die (user can override after)
+}
+$("ecp5-die").onchange = populatePackages;
+populatePackages();
 let yosysWorker = null;
-let estimateBusy = false;
+let busy = false; // Estimate and Route share the one wasm worker queue + the #resources panel, so gate both.
 let yosysReady = false;
 
 const RES_HINT = '<span class="dim">synthesize a kernel, then estimate gate/FPGA resources</span>';
@@ -338,9 +364,37 @@ function renderResources(m) {
     `<table>${rows}</table>`;
 }
 
-function finishEstimate() {
-  estimateBusy = false;
+function finishResources() {
+  busy = false;
   $("estimate").disabled = !lastResult;
+  $("route").disabled = !lastResult;
+}
+
+// Post-route report: headline Fmax, device utilization, and the Fmax-limiting critical path.
+function renderPnr(m) {
+  const rep = m.report || {};
+  const top = rep.fmax && rep.fmax[0];
+  const headline = top && typeof top.achieved === "number"
+    ? `<b>${top.achieved.toFixed(1)}</b> MHz`
+    : "<b>—</b> (no clocked paths)";
+  const clk = top ? ` · clock <code>${escapeHtml(top.clock)}</code>` : "";
+  const util = (rep.utilization || []).slice(0, 8).map((u) => {
+    const pct = u.available ? ((u.used / u.available) * 100).toFixed(u.used / u.available < 0.1 ? 1 : 0) : "?";
+    return `<span class=chip>${escapeHtml(u.type)} ${u.used}/${u.available} (${pct}%)</span>`;
+  }).join("");
+  const cp = rep.criticalPath;
+  let cpHtml = "";
+  if (cp) {
+    const srcs = (cp.sources || []).slice(0, 6).map(escapeHtml).join(", ");
+    cpHtml =
+      `<div class=warn>critical path ${cp.ns.toFixed(2)} ns ` +
+      `(logic ${cp.logic.toFixed(1)} + routing ${cp.routing.toFixed(1)}, ${cp.segments} hops)</div>` +
+      (srcs ? `<div class=dim>through: ${srcs}</div>` : "");
+  }
+  $("resources").innerHTML =
+    `<div class=head>${headline} post-route · ${escapeHtml(m.device)} · ${escapeHtml(m.top)}${clk}</div>` +
+    (util ? `<div class=chips>${util}</div>` : "") +
+    cpHtml;
 }
 
 function ensureYosys() {
@@ -349,34 +403,40 @@ function ensureYosys() {
   yosysWorker.onmessage = (e) => {
     const m = e.data;
     if (m.type === "progress") {
-      $("resources").innerHTML = `<span class=dim>loading yosys… ${((m.done / m.total) * 100).toFixed(0)}% of ${(m.total / 1048576).toFixed(0)} MB (cached after first load)</span>`;
+      $("resources").innerHTML = `<span class=dim>downloading… ${((m.done / m.total) * 100).toFixed(0)}% of ${(m.total / 1048576).toFixed(0)} MB (cached after first load)</span>`;
     } else if (m.type === "status") {
       $("resources").innerHTML = `<span class=dim>${escapeHtml(m.msg)}</span>`;
     } else if (m.type === "ready") {
       yosysReady = true;
-      if (!estimateBusy) $("resources").innerHTML = RES_HINT;
+      if (!busy) $("resources").innerHTML = RES_HINT;
       logMsg("yosys engine ready", "ok");
     } else if (m.type === "result") {
-      finishEstimate();
+      finishResources();
       renderResources(m);
       logMsg(`yosys ${m.target}: ${m.total} cells`, "ok");
+    } else if (m.type === "routeResult") {
+      finishResources();
+      renderPnr(m);
+      const f = m.report?.fmax?.[0]?.achieved;
+      logMsg(`nextpnr ${m.device}: routed${typeof f === "number" ? ` · Fmax ${f.toFixed(1)} MHz` : ""}`, "ok");
     } else if (m.type === "error") {
-      finishEstimate();
-      $("resources").innerHTML = `<div class=err>yosys failed:\n${escapeHtml(m.message)}</div>`;
-      logMsg("yosys estimate failed", "err");
+      finishResources();
+      $("resources").innerHTML = `<div class=err>${escapeHtml(m.message)}</div>`;
+      logMsg("resource estimate failed", "err");
     }
   };
   yosysWorker.onerror = (e) => {
-    finishEstimate();
+    finishResources();
     $("resources").innerHTML = `<div class=err>yosys worker error: ${escapeHtml(e.message || String(e))}</div>`;
   };
   return yosysWorker;
 }
 
 $("estimate").onclick = () => {
-  if (!lastResult || estimateBusy) return;
-  estimateBusy = true;
+  if (!lastResult || busy) return;
+  busy = true;
   $("estimate").disabled = true;
+  $("route").disabled = true;
   $("resources").innerHTML = '<span class="dim">starting yosys…</span>';
   ensureYosys().postMessage({
     type: "estimate",
@@ -386,6 +446,26 @@ $("estimate").onclick = () => {
     support: lastResult.support,
     supportHeader: lastResult.supportHeader,
     target: $("arch").value,
+  });
+};
+
+// Route is ECP5-only (the one nextpnr we ship) and independent of the histogram target: synth_ecp5 then
+// place&route on the 85k for real Fmax + post-route utilization. First click pulls ~170 MB of chipdb.
+$("route").onclick = () => {
+  if (!lastResult || busy) return;
+  busy = true;
+  $("estimate").disabled = true;
+  $("route").disabled = true;
+  $("resources").innerHTML = '<span class="dim">starting place &amp; route…</span>';
+  ensureYosys().postMessage({
+    type: "route",
+    id: ++reqId,
+    top: lastResult.top,
+    verilog: lastResult.verilog,
+    support: lastResult.support,
+    supportHeader: lastResult.supportHeader,
+    device: $("ecp5-die").value,
+    pkg: $("ecp5-pkg").value,
   });
 };
 

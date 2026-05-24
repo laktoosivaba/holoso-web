@@ -49,8 +49,9 @@ header .sub { color: #888; font-size: 0.85em; }
 #out-resources { display: none; flex-direction: column; }
 .restoolbar {
   display: flex; gap: 10px; align-items: center; padding: 6px 10px; flex: 0 0 auto;
-  background: var(--bg); border-bottom: 1px solid var(--bd);
+  background: var(--bg); border-bottom: 1px solid var(--bd); flex-wrap: wrap;
 }
+.restoolbar .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 2px; }
 #resources { flex: 1 1 0; min-height: 0; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
@@ -149,6 +150,19 @@ select {
           </select>
         </label>
         <button id=estimate disabled title="run Yosys in your browser on the generated Verilog (downloads ~50 MB on first use)">Estimate</button>
+        <span class=sep></span>
+        <label>ECP5
+          <select id=ecp5-die title="ECP5 device — logic / DSP / BRAM capacity">
+            <option value="--12k">12k</option>
+            <option value="--25k">25k</option>
+            <option value="--45k">45k</option>
+            <option value="--85k" selected>85k</option>
+          </select>
+        </label>
+        <label>package
+          <select id=ecp5-pkg title="package — pin count / number of I/O pads"></select>
+        </label>
+        <button id=route disabled title="place &amp; route on Lattice ECP5 in your browser for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
       </div>
       <div id=resources class=resbody><span class=dim>synthesize a kernel, then estimate gate/FPGA resources</span></div>
     </div>

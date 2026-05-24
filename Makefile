@@ -4,16 +4,18 @@ STATIC    := index.html app.js worker.js driver.py closure.js yosys-worker.js yo
 DIST      := dist
 PORT      ?= 8137
 YOSYS_GEN := tools/node_modules/@yowasp/yosys/gen
+NPNR_GEN  := tools/node_modules/@yowasp/nextpnr-ecp5/gen
 
-.PHONY: dist wheel node-deps vendor vendor-yosys vendor-hdl test serve clean image deploy
+.PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-hdl test serve clean image deploy
 
-dist: wheel vendor vendor-yosys vendor-hdl
+dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl
 	rm -rf $(DIST)
-	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/hdl
+	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/hdl
 	cp $(STATIC) $(DIST)/
 	cp wheels/$(WHEEL) $(DIST)/wheels/
 	cp -R pyodide/. $(DIST)/pyodide/
 	cp -R yosys/. $(DIST)/yosys/
+	cp -R nextpnr-ecp5/. $(DIST)/nextpnr-ecp5/
 	cp -R hdl/. $(DIST)/hdl/
 	@echo "assembled $(DIST)/ ($$(du -sh $(DIST) | cut -f1))"
 
@@ -32,6 +34,11 @@ vendor-yosys: node-deps
 	rm -rf yosys && mkdir -p yosys
 	cp -R $(YOSYS_GEN)/. yosys/
 
+# nextpnr-ecp5 ships the ECP5 chipdb for every device variant (~170 MB); served lazily, only on Route.
+vendor-nextpnr: node-deps
+	rm -rf nextpnr-ecp5 && mkdir -p nextpnr-ecp5
+	cp -R $(NPNR_GEN)/. nextpnr-ecp5/
+
 vendor-hdl:
 	node tools/vendor-hdl.mjs $(SYNTH)
 
@@ -48,4 +55,4 @@ deploy:
 	act -W .github/workflows/deploy.yml
 
 clean:
-	rm -rf $(DIST) wheels/*.whl pyodide yosys hdl tools/node_modules
+	rm -rf $(DIST) wheels/*.whl pyodide yosys nextpnr-ecp5 hdl tools/node_modules
