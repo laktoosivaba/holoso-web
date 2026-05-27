@@ -9,6 +9,15 @@ let py = null;
 
 const status = (msg) => postMessage({ type: "status", msg });
 
+// Demo kernels are static source files shipped with the site (demos/), not part of the holoso wheel; the picker
+// is built here so it never depends on the engine being up or on a synth-side demo package.
+async function loadDemos() {
+  const manifest = await (await fetch("demos/manifest.json")).json();
+  return Promise.all(
+    manifest.map(async (d) => ({ id: d.id, label: d.label, source: await (await fetch("demos/" + d.file)).text() }))
+  );
+}
+
 async function init() {
   status("loading Pyodide runtime…");
   py = await loadPyodide({ indexURL: PYODIDE_DIR });
@@ -28,7 +37,7 @@ async function init() {
     "import holoso, sys, numpy, sympy; " +
       "f'holoso {holoso.__version__} · CPython {sys.version.split()[0]} · numpy {numpy.__version__} · sympy {sympy.__version__}'"
   );
-  const examples = JSON.parse(py.runPython("demos_to_json()"));
+  const examples = await loadDemos();
   postMessage({ type: "ready", versions, examples });
 }
 

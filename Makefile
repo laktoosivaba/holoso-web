@@ -10,13 +10,14 @@ NPNR_GEN  := tools/node_modules/@yowasp/nextpnr-ecp5/gen
 
 dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl
 	rm -rf $(DIST)
-	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/hdl
+	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/hdl $(DIST)/demos
 	cp $(STATIC) $(DIST)/
 	cp wheels/$(WHEEL) $(DIST)/wheels/
 	cp -R pyodide/. $(DIST)/pyodide/
 	cp -R yosys/. $(DIST)/yosys/
 	cp -R nextpnr-ecp5/. $(DIST)/nextpnr-ecp5/
 	cp -R hdl/. $(DIST)/hdl/
+	cp -R demos/. $(DIST)/demos/
 	@echo "assembled $(DIST)/ ($$(du -sh $(DIST) | cut -f1))"
 
 wheel:

@@ -8,7 +8,7 @@ on:
         default: dev
       synth_ref:
         description: "Zubax/holoso ref to build the wheel from"
-        default: web-synth
+        default: dev
 
 jobs:
   build:

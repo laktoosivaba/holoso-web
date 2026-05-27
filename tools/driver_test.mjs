@@ -4,6 +4,16 @@ import { readFileSync } from "node:fs";
 const ROOT = "/Users/andrey/Projects/rust/holoso";
 const WHEEL = ROOT + "/holoso-synth/dist/holoso-0.1.0-py3-none-any.whl";
 const DRIVER = ROOT + "/holoso-web/driver.py";
+const DEMOS = ROOT + "/holoso-web/demos";
+
+// Mirror the worker: the demo corpus is static source files listed by demos/manifest.json -- not the wheel.
+function loadDemos() {
+  return JSON.parse(readFileSync(`${DEMOS}/manifest.json`, "utf8")).map((d) => ({
+    id: d.id,
+    label: d.label,
+    source: readFileSync(`${DEMOS}/${d.file}`, "utf8"),
+  }));
+}
 
 const log = (...a) => process.stdout.write(a.join(" ") + "\n");
 let failures = 0;
@@ -26,9 +36,9 @@ try {
   await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
   py.runPython(readFileSync(DRIVER, "utf8"));
 
-  log("\n=== bundled demos load + synthesize ===");
-  const demos = JSON.parse(py.runPython("demos_to_json()"));
-  check(demos.length >= 5, `loaded ${demos.length} demo kernels from the wheel`);
+  log("\n=== demo kernels load + synthesize ===");
+  const demos = loadDemos();
+  check(demos.length >= 5, `loaded ${demos.length} demo kernels`);
   for (const d of demos) {
     check(typeof d.id === "string" && typeof d.label === "string" && d.source.includes("def "), `demo ${d.id}: shape`);
     const r = synth(py, d.source, 8, 24, "", "");

@@ -177,7 +177,7 @@ worker.onmessage = (e) => {
       if (!editorTouched && examples.length) loadExample(examples[0].id);
       $("engine").textContent = m.versions;
       logMsg("engine ready · " + m.versions, "ok");
-      logMsg(`${examples.length} demo kernels loaded from the wheel`, "dim");
+      logMsg(`${examples.length} demo kernels loaded`, "dim");
       $("synth").disabled = false;
       break;
     case "fatal":

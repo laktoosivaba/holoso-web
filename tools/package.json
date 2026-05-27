@@ -7,8 +7,8 @@
   "scripts": {
     "test": "node driver_test.mjs",
     "test:closure": "node closure_test.mjs",
-    "test:yosys": "node yosys-worker-test.mjs",
-    "test:nextpnr": "node nextpnr-worker-test.mjs",
+    "test:yosys": "node --max-old-space-size=8192 yosys-worker-test.mjs",
+    "test:nextpnr": "node --max-old-space-size=8192 nextpnr-worker-test.mjs",
     "vendor": "node vendor-pyodide.mjs",
     "vendor:check": "node vendor-check.mjs"
   },

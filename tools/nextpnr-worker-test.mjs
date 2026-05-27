@@ -21,6 +21,14 @@ const WEB = fileURLToPath(new URL("../", import.meta.url));
 const WHEEL = WEB + "wheels/holoso-0.1.0-py3-none-any.whl";
 const DRIVER = WEB + "driver.py";
 const KULIBIN_DIR = WEB + "hdl/kulibin/";
+const DEMOS = WEB + "demos";
+
+// The demo corpus is static source files (demos/), listed by manifest.json -- same as the worker.
+const loadDemos = () =>
+  JSON.parse(readFileSync(`${DEMOS}/manifest.json`, "utf8")).map((d) => ({
+    id: d.id,
+    source: readFileSync(`${DEMOS}/${d.file}`, "utf8"),
+  }));
 
 const log = (...a) => process.stdout.write(a.join(" ") + "\n");
 let failures = 0;
@@ -63,7 +71,7 @@ try {
   py.runPython(readFileSync(DRIVER, "utf8"));
   log("yosys " + (await import("@yowasp/yosys")).version + " · nextpnr-ecp5 " + (await import("@yowasp/nextpnr-ecp5")).version + "\n");
 
-  const demos = JSON.parse(py.runPython("demos_to_json()"));
+  const demos = loadDemos();
   const synth = (id) => {
     const d = demos.find((x) => x.id === id);
     py.globals.set("_s", d.source);

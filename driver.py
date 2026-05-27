@@ -7,6 +7,9 @@ so it is exercised identically by ``worker.js`` (browser) and ``tools/`` (Node),
 
 A unique module name per call (``holoso_user_<n>``) gives every run a distinct ``__file__`` -> linecache stays
 correct across edits, and importlib never serves a stale cached module.
+
+The demo kernels shown in the picker are static source files in this repo (``demos/``), listed by the worker --
+they are not part of the holoso wheel, so this driver never imports them.
 """
 
 from __future__ import annotations
@@ -35,13 +38,6 @@ def _error(kind: str, message: str, **extra: object) -> str:
     return json.dumps({"ok": False, "error": {"kind": kind, "message": message}, **extra})
 
 
-def demos_to_json() -> str:
-    """Return the wheel-bundled demo kernels (id, label, verbatim source) as a JSON array for the example picker."""
-    from holoso.demos import load_demos
-
-    return json.dumps([{"id": d.id, "label": d.label, "source": d.source} for d in load_demos()])
-
-
 def _user_location(user_file: pathlib.Path) -> dict[str, object] | None:
     """Pull the last traceback frame inside the user's module file, so an import-time crash annotates the right line."""
     import linecache
@@ -55,10 +51,25 @@ def _user_location(user_file: pathlib.Path) -> dict[str, object] | None:
     return {"lineno": frame.lineno, "col": 0, "line": line.rstrip("\n")}
 
 
+def _default_ops(wexp: int, wman: int):
+    """Build the default per-operator configuration: every float operator at the requested ZKF format, no extra
+    pipeline stages. holoso.synthesize requires an explicit OpConfig; the web always synthesizes the bare kernel."""
+    from holoso import FAddOperator, FDivOperator, FMulILog2OperatorFamily, FMulOperator, FloatFormat, OpConfig
+
+    fmt = FloatFormat(wexp=int(wexp), wman=int(wman))
+    return OpConfig(
+        fadd=FAddOperator(fmt),
+        fmul=FMulOperator(fmt),
+        fdiv=FDivOperator(fmt),
+        fmul_ilog2=FMulILog2OperatorFamily(fmt),
+    )
+
+
 def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str = "") -> str:
     """Synthesize ``source`` and return a JSON result envelope (see module docstring)."""
-    from holoso import FloatFormat, synthesize
-    from holoso.errors import HolosoError
+    from collections import Counter
+
+    from holoso import HolosoError, synthesize
 
     global _counter
     _counter += 1
@@ -87,13 +98,9 @@ def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str 
         return _error("BadEntry", f"entry {target_name!r} not found among {candidates}", targets=candidates)
 
     try:
-        result = synthesize(
-            getattr(module, target_name),
-            float_format=FloatFormat(wexp=int(wexp), wman=int(wman)),
-            name=(name.strip() or None),
-        )
+        result = synthesize(getattr(module, target_name), ops=_default_ops(wexp, wman), name=(name.strip() or None))
     except HolosoError as exc:
-        err: dict[str, object] = {"kind": type(exc).__name__, "message": getattr(exc, "message", str(exc))}
+        err = {"kind": type(exc).__name__, "message": getattr(exc, "message", str(exc))}
         loc = getattr(exc, "location", None)
         if loc is not None:
             err["location"] = {"lineno": loc.lineno, "col": loc.col, "line": loc.line}
@@ -103,26 +110,30 @@ def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str 
             {"ok": False, "error": {"kind": "InternalError", "message": traceback.format_exc()}, "targets": candidates}
         )
 
-    metrics = result.metrics
-    instances = " ".join(f"{count}×{getattr(kind, 'value', kind)}" for kind, count in metrics.operator_instances.items())
+    # Post-synthesis figures live on the numerical model's Lir (the only public handle that carries them); the
+    # support RTL comes back as a name->text map alongside the generated module.
+    lir = result.numerical_model.lir
+    support = result.verilog_output.support_files
+    counts = Counter(inst.operator.mnemonic for inst in lir.float_instances)
+    instances = " ".join(f"{n}×{m}" for m, n in sorted(counts.items()))
     return json.dumps(
         {
             "ok": True,
             "targets": candidates,
             "target": target_name,
             "module_name": result.module_name,
-            "verilog": result.verilog,
-            "support": result.support,
-            "support_header": result.support_header,
-            "testbench": result.testbench,
-            "report_html": result.report_html,
+            "verilog": result.verilog_output.verilog,
+            "support": support.get("holoso_support.v", ""),
+            "support_header": support.get("holoso_support.vh", ""),
+            "testbench": result.cocotb_output.testbench,
+            "report_html": result.html_output.html,
             "metrics": {
                 "operator_instances": instances or "-",
-                "float_regs": metrics.n_float_regs,
-                "steps": metrics.makespan,
-                "ii_cycles": metrics.ii_cycles,
-                "op_count": metrics.op_count,
-                "max_chain_len": metrics.max_chain_len,
+                "float_regs": lir.float_regfile.nreg,
+                "steps": lir.makespan,
+                "ii_cycles": lir.initiation_interval,
+                "op_count": lir.op_count,
+                "max_chain_len": lir.max_chain_len,
             },
         }
     )
