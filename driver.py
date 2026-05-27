@@ -120,7 +120,7 @@ def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str 
                 "operator_instances": instances or "-",
                 "float_regs": metrics.n_float_regs,
                 "steps": metrics.makespan,
-                "ii_estimate": metrics.ii_estimate,
+                "ii_cycles": metrics.ii_cycles,
                 "op_count": metrics.op_count,
                 "max_chain_len": metrics.max_chain_len,
             },

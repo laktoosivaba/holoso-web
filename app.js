@@ -220,7 +220,7 @@ function onResult(jsonStr) {
     const mt = r.metrics || {};
     logMsg(
       `synthesized ${r.target} → ${mod}.v · ${mt.operator_instances} · ${mt.float_regs} float regs · ` +
-        `${mt.steps} steps · II≈${mt.ii_estimate} · chain ${mt.max_chain_len}`,
+        `${mt.steps} steps · II ${mt.ii_cycles} cyc · chain ${mt.max_chain_len}`,
       "ok"
     );
   } else {
