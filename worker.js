@@ -21,8 +21,8 @@ async function loadDemos() {
 async function init() {
   status("loading Pyodide runtime…");
   py = await loadPyodide({ indexURL: PYODIDE_DIR });
-  status("loading numpy + sympy…");
-  await py.loadPackage(["micropip", "numpy", "sympy"]);
+  status("loading numpy + scipy + sympy…");
+  await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
 
   status("installing holoso…");
   // cache: "reload" forces a network fetch, bypassing any stale HTTP-cache entry. The wheel keeps a fixed
@@ -34,8 +34,8 @@ async function init() {
 
   py.runPython(await (await fetch("driver.py")).text());
   const versions = py.runPython(
-    "import holoso, sys, numpy, sympy; " +
-      "f'holoso {holoso.__version__} · CPython {sys.version.split()[0]} · numpy {numpy.__version__} · sympy {sympy.__version__}'"
+    "import holoso, sys, numpy, scipy, sympy; " +
+      "f'holoso {holoso.__version__} · CPython {sys.version.split()[0]} · numpy {numpy.__version__} · scipy {scipy.__version__} · sympy {sympy.__version__}'"
   );
   const examples = await loadDemos();
   postMessage({ type: "ready", versions, examples });

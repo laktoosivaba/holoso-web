@@ -124,7 +124,6 @@ def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str 
             "module_name": result.module_name,
             "verilog": result.verilog_output.verilog,
             "support": support.get("holoso_support.v", ""),
-            "support_header": support.get("holoso_support.vh", ""),
             "testbench": result.cocotb_output.testbench,
             "report_html": result.html_output.html,
             "metrics": {

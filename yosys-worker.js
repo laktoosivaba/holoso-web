@@ -39,13 +39,13 @@ function loadKulibin() {
 }
 
 async function estimate(req) {
-  const { top, verilog, support, supportHeader, target } = req;
+  const { top, verilog, support, target } = req;
   postMessage({ type: "status", id: req.id, msg: `synthesizing ${top} for ${target}…` });
   const kulibin = await loadKulibin();
   const library = { "holoso_support.v": support, ...kulibin };
   const { files: libFiles } = closure(top, verilog, library);
 
-  const files = { "holoso_support.vh": supportHeader, [`${top}.v`]: verilog, "job.ys": synthScript(top, libFiles, target) };
+  const files = { [`${top}.v`]: verilog, "job.ys": synthScript(top, libFiles, target) };
   for (const f of libFiles) files[f] = library[f];
 
   let log = "";
@@ -86,14 +86,14 @@ function pnrErrorMessage(err, log, pkg) {
 }
 
 async function route(req) {
-  const { top, verilog, support, supportHeader, device, pkg } = req;
+  const { top, verilog, support, device, pkg } = req;
   const label = `ECP5-${(device || "--85k").replace(/^--/, "")}${pkg ? " " + pkg : ""}`;
   postMessage({ type: "status", id: req.id, msg: `synthesizing ${top} for ECP5…` });
   const kulibin = await loadKulibin();
   const library = { "holoso_support.v": support, ...kulibin };
   const { files: libFiles } = closure(top, verilog, library);
 
-  const files = { "holoso_support.vh": supportHeader, [`${top}.v`]: verilog, "job.ys": ecp5JsonScript(top, libFiles) };
+  const files = { [`${top}.v`]: verilog, "job.ys": ecp5JsonScript(top, libFiles) };
   for (const f of libFiles) files[f] = library[f];
 
   let synthLog = "";

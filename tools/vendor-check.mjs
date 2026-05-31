@@ -25,12 +25,12 @@ const check = (cond, msg) => {
 try {
   log(`booting Pyodide from vendored dir: ${VENDOR}`);
   const py = await loadPyodide({ indexURL: VENDOR });
-  await py.loadPackage(["micropip", "numpy", "sympy"]);
+  await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
   py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
   await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
   py.runPython(readFileSync(DRIVER, "utf8"));
 
-  const v = py.runPython("import numpy, sympy, holoso; f'numpy {numpy.__version__} sympy {sympy.__version__}'");
+  const v = py.runPython("import numpy, scipy, sympy, holoso; f'numpy {numpy.__version__} scipy {scipy.__version__} sympy {sympy.__version__}'");
   check(true, `runtime up · ${v}`);
   const demos = loadDemos();
   check(demos.length >= 5, `demos load (${demos.length})`);

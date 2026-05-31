@@ -31,7 +31,7 @@ function synth(py, src, wexp, wman, entry, name) {
 
 try {
   const py = await loadPyodide();
-  await py.loadPackage(["micropip", "numpy", "sympy"]);
+  await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
   py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
   await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
   py.runPython(readFileSync(DRIVER, "utf8"));

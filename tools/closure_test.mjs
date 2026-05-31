@@ -22,7 +22,7 @@ const check = (cond, msg) => {
   if (!cond) failures++;
 };
 
-const wrap = (name, body) => `\`include "holoso_support.vh"\nmodule ${name} #(parameter WEXP=8, parameter WMAN=24) ();\n${body}\nendmodule\n`;
+const wrap = (name, body) => `module ${name} #(parameter WEXP=8, parameter WMAN=24) ();\n${body}\nendmodule\n`;
 
 // 1. Pure-synthetic BFS: only modules reachable from the top, transitively; unrelated files excluded.
 {

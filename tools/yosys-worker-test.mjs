@@ -36,10 +36,10 @@ const manifest = JSON.parse(readFileSync(KULIBIN_DIR + "manifest.json", "utf8"))
 const kulibin = Object.fromEntries(manifest.map((n) => [n, readFileSync(KULIBIN_DIR + n, "utf8")]));
 check(manifest.length >= 20, `vendored kulibin manifest has ${manifest.length} files`);
 
-async function run(top, verilog, support, supportHeader, target) {
+async function run(top, verilog, support, target) {
   const library = { "holoso_support.v": support, ...kulibin };
   const { files: libFiles } = closure(top, verilog, library);
-  const files = { "holoso_support.vh": supportHeader, [`${top}.v`]: verilog, "job.ys": synthScript(top, libFiles, target) };
+  const files = { [`${top}.v`]: verilog, "job.ys": synthScript(top, libFiles, target) };
   for (const f of libFiles) files[f] = library[f];
   const out = await runYosys(["job.ys"], files, { stdout: () => {}, stderr: () => {}, decodeASCII: true });
   return cellHistogram(JSON.parse(out["netlist.json"]), top);
@@ -48,7 +48,7 @@ async function run(top, verilog, support, supportHeader, target) {
 try {
   log("booting Pyodide + holoso …");
   const py = await loadPyodide();
-  await py.loadPackage(["micropip", "numpy", "sympy"]);
+  await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
   py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
   await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
   py.runPython(readFileSync(DRIVER, "utf8"));
@@ -61,8 +61,8 @@ try {
     py.globals.set("_s", d.source);
     const r = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '')"));
     if (!r.ok) { check(false, `${d.id}: synth failed (${r.error?.kind})`); continue; }
-    check(typeof r.support_header === "string" && r.support_header.includes("HOLOSO_REGFILE"), `${d.id}: result carries support_header (.vh)`);
-    const counts = await run(r.module_name, r.verilog, r.support, r.support_header, "generic");
+    check(typeof r.support === "string" && r.support.includes("holoso_fadd"), `${d.id}: result carries holoso_support.v`);
+    const counts = await run(r.module_name, r.verilog, r.support, "generic");
     const total = counts && Object.values(counts).reduce((a, b) => a + b, 0);
     check(counts && total > 0, `${d.id}: generic netlist has cells (${total})`);
   }
@@ -71,7 +71,7 @@ try {
   py.globals.set("_s", demos.find((d) => d.id === "dot2").source);
   const dot2 = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '')"));
   for (const [target, dspRe] of [["ecp5", /MULT18X18D/], ["xilinx", /DSP48E1/], ["ice40", /SB_LUT4/]]) {
-    const counts = await run(dot2.module_name, dot2.verilog, dot2.support, dot2.support_header, target);
+    const counts = await run(dot2.module_name, dot2.verilog, dot2.support, target);
     const keys = Object.keys(counts || {});
     check(keys.some((k) => dspRe.test(k)), `dot2/${target}: netlist has ${dspRe.source} (${keys.filter((k) => dspRe.test(k)).map((k) => k + "=" + counts[k]).join(",") || "MISSING"})`);
   }

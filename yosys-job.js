@@ -8,9 +8,9 @@ const SYNTH_CMD = {
   ice40: (top) => `synth_ice40 -top ${top} -flatten`,
 };
 
-// `<top>.v` is read first so its `include "holoso_support.vh" defines the macros holoso_support.v needs
-// (read_verilog keeps preprocessor defines across the files of one invocation). hierarchy -check aborts on
-// any unresolved module -- the authoritative completeness check. write_json gives the machine-readable
+// `<top>.v` is read first, then the support library and the Kulibin closure -- read_verilog accepts the
+// whole bag in one invocation, so module resolution is order-independent. hierarchy -check aborts on any
+// unresolved module -- the authoritative completeness check. write_json gives the machine-readable
 // netlist we histogram; stat is emitted too, for the human-readable log.
 function synthScript(top, libFiles, target) {
   const reads = [`${top}.v`, ...libFiles].join(" ");
@@ -33,8 +33,8 @@ function synthScript(top, libFiles, target) {
 const ECP5_DEVICE = "--85k";
 const ECP5_PACKAGE = "CABGA756";
 
-// synth_ecp5 -> write_json, the exact netlist nextpnr-ecp5 consumes. `${top}.v` is read first so its
-// `include "holoso_support.vh" defines reach holoso_support.v (see synthScript).
+// synth_ecp5 -> write_json, the exact netlist nextpnr-ecp5 consumes. Same one-shot read_verilog as
+// synthScript (top + support + Kulibin closure together; module resolution order-independent).
 function ecp5JsonScript(top, libFiles, jsonOut = "design.json") {
   const reads = [`${top}.v`, ...libFiles].join(" ");
   return [

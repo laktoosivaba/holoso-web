@@ -204,16 +204,15 @@ function onResult(jsonStr) {
 
   if (r.ok) {
     const mod = r.module_name;
-    // Report first (the default tab — it's the most useful view), then the .v/.vh/testbench sources.
+    // Report first (the default tab — it's the most useful view), then the .v/testbench sources.
     // The "resources" pseudo-tab is slotted between them in renderTabs().
     files = [
       { name: mod + ".html", content: r.report_html, kind: "html" },
       { name: mod + ".v", content: r.verilog, kind: "text", mode: "verilog" },
       { name: "holoso_support.v", content: r.support, kind: "text", mode: "verilog" },
-      { name: "holoso_support.vh", content: r.support_header, kind: "text", mode: "verilog" },
       { name: "test_" + mod + ".py", content: r.testbench, kind: "text", mode: "python" },
     ];
-    lastResult = { top: mod, verilog: r.verilog, support: r.support, supportHeader: r.support_header };
+    lastResult = { top: mod, verilog: r.verilog, support: r.support };
     $("estimate").disabled = false;
     $("route").disabled = false;
     selectTab(0);
@@ -447,7 +446,6 @@ $("estimate").onclick = () => {
     top: lastResult.top,
     verilog: lastResult.verilog,
     support: lastResult.support,
-    supportHeader: lastResult.supportHeader,
     target: $("arch").value,
   });
 };
@@ -466,7 +464,6 @@ $("route").onclick = () => {
     top: lastResult.top,
     verilog: lastResult.verilog,
     support: lastResult.support,
-    supportHeader: lastResult.supportHeader,
     device: $("ecp5-die").value,
     pkg: $("ecp5-pkg").value,
   });

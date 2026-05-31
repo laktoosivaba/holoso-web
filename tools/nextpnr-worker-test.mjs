@@ -42,10 +42,10 @@ const kulibin = Object.fromEntries(manifest.map((n) => [n, readFileSync(KULIBIN_
 
 // Mirror the worker's route(): synth_ecp5 -> design.json, then nextpnr-ecp5 -> report.json.
 // Returns { report, log } on success; throws { message, log } on PnR failure (log carries nextpnr's stderr).
-async function routeOnce(top, verilog, support, supportHeader) {
+async function routeOnce(top, verilog, support) {
   const library = { "holoso_support.v": support, ...kulibin };
   const { files: libFiles } = closure(top, verilog, library);
-  const files = { "holoso_support.vh": supportHeader, [`${top}.v`]: verilog, "job.ys": ecp5JsonScript(top, libFiles) };
+  const files = { [`${top}.v`]: verilog, "job.ys": ecp5JsonScript(top, libFiles) };
   for (const f of libFiles) files[f] = library[f];
 
   const synthOut = await runYosys(["job.ys"], files, { stdout: () => {}, stderr: () => {}, decodeASCII: true });
@@ -65,7 +65,7 @@ async function routeOnce(top, verilog, support, supportHeader) {
 try {
   log("booting Pyodide + holoso …");
   const py = await loadPyodide();
-  await py.loadPackage(["micropip", "numpy", "sympy"]);
+  await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
   py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
   await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
   py.runPython(readFileSync(DRIVER, "utf8"));
@@ -81,7 +81,7 @@ try {
   // 1. small kernel routes and yields real timing/area.
   const dot2 = synth("dot2");
   check(dot2.ok, "dot2 synthesized");
-  const r = await routeOnce(dot2.module_name, dot2.verilog, dot2.support, dot2.support_header);
+  const r = await routeOnce(dot2.module_name, dot2.verilog, dot2.support);
   check(r.report != null, "dot2 produced a parseable PnR report");
   const fmax = r.report?.fmax?.[0]?.achieved;
   check(typeof fmax === "number" && fmax > 0, `dot2 Fmax reported (${fmax ? fmax.toFixed(1) + " MHz" : "MISSING"})`);
@@ -93,7 +93,7 @@ try {
   check(ekf.ok, "ekf_update synthesized");
   let threw = false, padOverflow = false;
   try {
-    await routeOnce(ekf.module_name, ekf.verilog, ekf.support, ekf.support_header);
+    await routeOnce(ekf.module_name, ekf.verilog, ekf.support);
   } catch (e) {
     threw = true;
     padOverflow = /TRELLIS_IO/.test(e.log || "");
