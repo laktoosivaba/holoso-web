@@ -23,9 +23,9 @@ for (const file of files) {
   const id = file.replace(/\.py$/, "");
   
   let desc = id;
-  const match = content.match(/(?:^|\n)"""([^\n]*?)"""/);
+  const match = content.match(/(?:^|\n)"""\s*([^]*?)\s*"""/);
   if (match) {
-    desc = match[1].trim();
+    desc = match[1].split('\n')[0].trim();
   }
   
   let label = `${id} — ${desc}`;
