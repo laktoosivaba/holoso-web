@@ -21,8 +21,8 @@ async function loadDemos() {
 async function init() {
   status("loading Pyodide runtime…");
   py = await loadPyodide({ indexURL: PYODIDE_DIR });
-  status("loading numpy + scipy + sympy…");
-  await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
+  status("loading numpy + scipy + sympy + test deps…");
+  await py.loadPackage(["micropip", "numpy", "scipy", "sympy", "pytest"]);
 
   status("installing holoso…");
   // cache: "reload" forces a network fetch, bypassing any stale HTTP-cache entry. The wheel keeps a fixed
