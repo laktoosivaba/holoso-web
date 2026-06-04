@@ -23,17 +23,17 @@ for (const file of files) {
   const id = file.replace(/\.py$/, "");
   
   let desc = id;
-  const match = content.match(/(?:^|\n)"""([^\n]*?)(?:"""|$)/);
+  const match = content.match(/(?:^|\n)"""([^\n]*?)"""/);
   if (match) {
     desc = match[1].trim();
   }
   
-  // if desc already starts with "id - " or "id — ", remove it
+  let label = `${id} — ${desc}`;
   if (desc.startsWith(id + " - ") || desc.startsWith(id + " — ")) {
-    desc = desc.substring(id.length + 3);
+    label = desc; // preserve existing prefix
   }
   
-  manifest.push({ id, label: `${id} — ${desc}`, file });
+  manifest.push({ id, label, file });
   await copyFile(`${SRC}/${file}`, OUT + file);
 }
 
