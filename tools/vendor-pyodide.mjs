@@ -7,7 +7,7 @@ const VERSION = require("pyodide/package.json").version;
 const BASE = `https://cdn.jsdelivr.net/pyodide/v${VERSION}/full/`;
 const OUT = new URL("../pyodide/", import.meta.url);
 
-const NEEDED = ["micropip", "numpy", "scipy", "sympy"];
+const NEEDED = ["micropip", "numpy", "scipy", "sympy", "pytest", "jaxtyping"];
 const CORE = ["pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json"];
 
 async function fetchBytes(name) {
