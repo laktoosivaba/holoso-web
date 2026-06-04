@@ -8,7 +8,7 @@ NPNR_GEN  := tools/node_modules/@yowasp/nextpnr-ecp5/gen
 
 .PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-hdl test serve clean image deploy
 
-dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl
+dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples
 	rm -rf $(DIST)
 	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/hdl $(DIST)/demos
 	cp $(STATIC) $(DIST)/
@@ -39,6 +39,9 @@ vendor-yosys: node-deps
 vendor-nextpnr: node-deps
 	rm -rf nextpnr-ecp5 && mkdir -p nextpnr-ecp5
 	cp -R $(NPNR_GEN)/. nextpnr-ecp5/
+
+vendor-examples:
+	node tools/vendor-examples.mjs $(SYNTH)
 
 vendor-hdl:
 	node tools/vendor-hdl.mjs $(SYNTH)

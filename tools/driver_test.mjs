@@ -1,10 +1,12 @@
 import { loadPyodide } from "pyodide";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const ROOT = "/Users/andrey/Projects/rust/holoso";
-const WHEEL = ROOT + "/holoso-synth/dist/holoso-0.1.0-py3-none-any.whl";
-const DRIVER = ROOT + "/holoso-web/driver.py";
-const DEMOS = ROOT + "/holoso-web/demos";
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const SYNTH = process.env.SYNTH || ROOT + "../holoso-synth";
+const WHEEL = SYNTH + "/dist/holoso-0.1.0-py3-none-any.whl";
+const DRIVER = ROOT + "driver.py";
+const DEMOS = ROOT + "demos";
 
 // Mirror the worker: the demo corpus is static source files listed by demos/manifest.json -- not the wheel.
 function loadDemos() {
