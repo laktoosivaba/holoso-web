@@ -22,7 +22,7 @@ async function loadDemos() {
         (d.extras || []).map(async (name) => [name, await (await fetch("demos/" + name)).text()])
       );
       const extras = Object.fromEntries(extraFiles);
-      return { id: d.id, label: d.label, source, extras };
+      return { id: d.id, label: d.label, filename: d.file, source, extras };
     })
   );
 }
@@ -60,14 +60,11 @@ async function init() {
   postMessage({ type: "ready", versions, examples });
 }
 
-function synth(req) {
+function run(req) {
+  py.globals.set("_filename", req.filename || "main.py");
   py.globals.set("_src", req.source);
-  py.globals.set("_wexp", Number(req.wexp));
-  py.globals.set("_wman", Number(req.wman));
-  py.globals.set("_entry", req.entry || "");
-  py.globals.set("_name", req.name || "");
   py.globals.set("_extras", req.extras ? JSON.stringify(req.extras) : "");
-  const json = py.runPython("synth_to_json(_src, _wexp, _wman, _entry, _name, _extras)");
+  const json = py.runPython("run_script(_filename, _src, _extras)");
   postMessage({ type: "result", id: req.id, json });
 }
 
@@ -75,10 +72,10 @@ onmessage = async (e) => {
   const m = e.data;
   try {
     if (m.type === "init") await init();
-    else if (m.type === "synth") synth(m);
+    else if (m.type === "run") run(m);
   } catch (err) {
     const message = String((err && err.message) || err);
     if (m.type === "init") postMessage({ type: "fatal", msg: message });
-    else postMessage({ type: "result", id: m.id, json: JSON.stringify({ ok: false, error: { kind: "WorkerError", message } }) });
+    else postMessage({ type: "result", id: m.id, json: JSON.stringify({ ok: false, error: { kind: "WorkerError", message }, stdout: "", stderr: "", files: [] }) });
   }
 };
