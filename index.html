@@ -14,6 +14,7 @@
   --log-fg: #d4d4d4;
   --log-err: #ff6e6e;
   --log-ok: #75d65f;
+  --log-warn: #e6c25f;
   --log-dim: #888;
 }
 * { box-sizing: border-box; }
@@ -114,9 +115,10 @@ select {
   background: var(--log-bg); color: var(--log-fg); font-size: 0.8em;
   overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
-#log .err { color: var(--log-err); }
-#log .ok  { color: var(--log-ok); }
-#log .dim { color: var(--log-dim); }
+#log .err  { color: var(--log-err); }
+#log .ok   { color: var(--log-ok); }
+#log .warn { color: var(--log-warn); }
+#log .dim  { color: var(--log-dim); }
 #resources .dim { color: #999; }
 #resources .err { color: #c0392b; white-space: pre-wrap; }
 #resources .head { margin-bottom: 6px; }
@@ -161,7 +163,6 @@ select {
 <div class=view id=view-output>
   <div class=split>
     <div class=tree-pane>
-      <h2>files</h2>
       <div id=output-tree class=tree></div>
       <div class=tree-footer>
         <button id=download disabled title="download the file selected in the tree">Download</button>
@@ -178,7 +179,6 @@ select {
 <div class=view id=view-resources>
   <div class=split>
     <div class=tree-pane>
-      <h2><span>files</span><span class=grow></span><span class=sub style="font-weight:400">.v only</span></h2>
       <div id=resources-tree class=tree></div>
     </div>
     <div class=preview-pane>

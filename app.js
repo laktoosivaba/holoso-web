@@ -24,10 +24,28 @@ function logMsg(msg, cls) {
   $("log").scrollTop = $("log").scrollHeight;
 }
 
-// Mirror Python's stream contents into the log, one line per timestamp, classed for stdout vs stderr.
+// Mirror Python's stream contents into the log. stdout is uniformly informational. stderr carries both
+// genuine errors AND holoso's logging output (the Python logging module writes to stderr by default), so
+// classify stderr lines by their leading level word -- otherwise routine INFO records read as failure.
+// Continuation lines (no leading level word) inherit the previous line's class, since multi-line log
+// records share a single severity.
+const LOG_LEVEL_CLS = { DEBUG: "dim", INFO: "dim", WARNING: "warn", WARN: "warn", ERROR: "err", CRITICAL: "err", FATAL: "err" };
+function classifyStderr(line, prevCls) {
+  const m = line.match(/^(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL)\b/);
+  if (m) return LOG_LEVEL_CLS[m[1]];
+  // Lines starting with whitespace are continuations of the prior record; keep its class.
+  if (/^\s/.test(line) && prevCls) return prevCls;
+  return "err";
+}
 function logStreams(stdout, stderr) {
   for (const line of (stdout || "").split("\n")) if (line) logMsg(line, "dim");
-  for (const line of (stderr || "").split("\n")) if (line) logMsg(line, "err");
+  let prev = null;
+  for (const line of (stderr || "").split("\n")) {
+    if (!line) continue;
+    const cls = classifyStderr(line, prev);
+    logMsg(line, cls);
+    prev = cls;
+  }
 }
 
 const ed = ace.edit("src-editor");
