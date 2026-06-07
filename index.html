@@ -60,6 +60,11 @@ header .sub { color: #888; font-size: 0.85em; }
 .tree:empty::before {
   content: "no files yet"; display: block; padding: 6px 12px; color: #999; font-style: italic;
 }
+.tree-footer {
+  flex: 0 0 auto; display: flex; gap: 6px; padding: 5px 8px;
+  background: var(--bg); border-top: 1px solid var(--bd);
+}
+.tree-footer button { font-size: 0.8em; padding: 3px 9px; flex: 1 1 0; }
 .tree ul { list-style: none; margin: 0; padding: 0; }
 .tree li { margin: 0; padding: 0; }
 .tree .dir, .tree .file {
@@ -156,13 +161,12 @@ select {
 <div class=view id=view-output>
   <div class=split>
     <div class=tree-pane>
-      <h2>
-        <span>files</span>
-        <span class=grow></span>
+      <h2>files</h2>
+      <div id=output-tree class=tree></div>
+      <div class=tree-footer>
         <button id=download disabled title="download the file selected in the tree">Download</button>
         <button id=download-all disabled title="all generated files + the Kulibin support RTL, as one .tar.gz">Bundle</button>
-      </h2>
-      <div id=output-tree class=tree></div>
+      </div>
     </div>
     <div class=preview-pane id=output-preview>
       <div id=out-editor class="editor short"></div>
