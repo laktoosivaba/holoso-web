@@ -28,6 +28,53 @@ _USER_DIR = pathlib.Path("/user")
 _TEXT_EXTS = frozenset({"v", "vh", "sv", "svh", "vhd", "vhdl", "html", "htm", "txt", "json", "py", "log", "csv", "md", "rpt"})
 
 
+class _StreamRedirect(io.TextIOBase):
+    """sys.stdout / sys.stderr replacement that fans every write into both a StringIO buffer (returned in
+    the JSON envelope, unchanged from before) and an optional per-line JS callback (live UI streaming).
+
+    The worker drops a JS function into module globals as ``_stream_line`` before each run; headless test
+    contexts leave it unset and the class degrades to a plain buffer. Partial writes are accumulated and
+    only emitted to the callback on ``\\n`` -- so ``print(x)`` (write str, write "\\n") fires exactly one
+    line, and a logging record split across multiple writes still surfaces as one line."""
+
+    def __init__(self, name: str, buf: io.StringIO, callback) -> None:
+        self.name = name
+        self.buf = buf
+        self.callback = callback
+        self._pending = ""
+
+    def writable(self) -> bool:
+        return True
+
+    def isatty(self) -> bool:
+        return False
+
+    def write(self, s: str) -> int:
+        if not isinstance(s, str):
+            s = str(s)
+        self.buf.write(s)
+        if self.callback is None:
+            return len(s)
+        self._pending += s
+        while "\n" in self._pending:
+            line, self._pending = self._pending.split("\n", 1)
+            try:
+                self.callback(self.name, line)
+            except Exception:
+                # A callback fault must not crash synthesis; mute it and keep buffering for the envelope.
+                self.callback = None
+                break
+        return len(s)
+
+    def flush(self) -> None:
+        if self.callback and self._pending:
+            try:
+                self.callback(self.name, self._pending)
+            except Exception:
+                pass
+            self._pending = ""
+
+
 def _validate_filename(name: str) -> str | None:
     """Return None if ``name`` is a safe leaf filename ending in .py; else a short reason."""
     if not isinstance(name, str) or not name:
@@ -188,11 +235,14 @@ def run_script(filename: str, source: str, extras: str = "") -> str:
 
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
+    callback = globals().get("_stream_line")
+    stdout_stream = _StreamRedirect("stdout", stdout_buf, callback)
+    stderr_stream = _StreamRedirect("stderr", stderr_buf, callback)
     error: dict[str, object] | None = None
     prev_cwd = os.getcwd()
     try:
         os.chdir(str(_USER_DIR))
-        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+        with contextlib.redirect_stdout(stdout_stream), contextlib.redirect_stderr(stderr_stream):
             try:
                 from holoso import HolosoError
             except Exception:
@@ -208,6 +258,10 @@ def run_script(filename: str, source: str, extras: str = "") -> str:
             except BaseException:
                 error = _format_exec_error(user_file)
     finally:
+        # Flush trailing partial lines (no terminating newline) so the live UI sees them too. The envelope
+        # captures the raw text via StringIO regardless, so this only matters for the streaming path.
+        stdout_stream.flush()
+        stderr_stream.flush()
         os.chdir(prev_cwd)
         if previous_main is not None:
             sys.modules["__main__"] = previous_main

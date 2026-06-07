@@ -24,27 +24,28 @@ function logMsg(msg, cls) {
   $("log").scrollTop = $("log").scrollHeight;
 }
 
-// Mirror Python's stream contents into the log. stdout is uniformly informational. stderr carries both
-// genuine errors AND holoso's logging output (the Python logging module writes to stderr by default), so
-// classify stderr lines by their leading level word -- otherwise routine INFO records read as failure.
-// Continuation lines (no leading level word) inherit the previous line's class, since multi-line log
-// records share a single severity.
+// Stderr carries both genuine errors AND holoso's logging output (the Python logging module writes to
+// stderr by default), so classify stderr lines by their leading level word -- otherwise routine INFO
+// records read as failure. Continuation lines (no leading level word) inherit the previous line's class,
+// since multi-line log records share a single severity. State persists across stream messages within
+// one run and resets on each new Run click.
 const LOG_LEVEL_CLS = { DEBUG: "dim", INFO: "dim", WARNING: "warn", WARN: "warn", ERROR: "err", CRITICAL: "err", FATAL: "err" };
 function classifyStderr(line, prevCls) {
   const m = line.match(/^(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL)\b/);
   if (m) return LOG_LEVEL_CLS[m[1]];
-  // Lines starting with whitespace are continuations of the prior record; keep its class.
   if (/^\s/.test(line) && prevCls) return prevCls;
   return "err";
 }
-function logStreams(stdout, stderr) {
-  for (const line of (stdout || "").split("\n")) if (line) logMsg(line, "dim");
-  let prev = null;
-  for (const line of (stderr || "").split("\n")) {
-    if (!line) continue;
-    const cls = classifyStderr(line, prev);
+let lastStderrCls = null;
+function logStreamLine(stream, line) {
+  if (!line) return;
+  if (stream === "stdout") {
+    logMsg(line, "dim");
+    lastStderrCls = null;  // stderr continuation breaks when stdout interleaves
+  } else {
+    const cls = classifyStderr(line, lastStderrCls);
     logMsg(line, cls);
-    prev = cls;
+    lastStderrCls = cls;
   }
 }
 
@@ -348,6 +349,9 @@ worker.onmessage = (e) => {
       $("engine").textContent = "engine failed to start";
       logMsg("engine init failed: " + m.msg, "err");
       break;
+    case "stream":
+      logStreamLine(m.stream, m.line);
+      break;
     case "result":
       onResult(m.json);
       break;
@@ -382,8 +386,8 @@ function onResult(jsonStr) {
     return;
   }
 
-  // Stream output goes to the log regardless of ok/fail -- partial stdout up to the error is useful diagnostic.
-  logStreams(r.stdout, r.stderr);
+  // stdout/stderr were already painted live via the "stream" message handler; the envelope still carries
+  // them for clients (tests, devtools) that want the full transcript, but no need to re-log here.
 
   if (r.ok) {
     files = (r.files || []).map((f) => ({
@@ -444,6 +448,7 @@ $("run").onclick = () => {
   }
   $("run").disabled = true;
   clearOutput();
+  lastStderrCls = null;  // fresh stderr-continuation state for the new run
 
   // Extras follow the loaded example so cross-file demos (e.g. ekf1_stateful imports ekf1_stateless) resolve.
   const currentExample = examples.find((e) => e.id === currentExampleId);

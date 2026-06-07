@@ -64,6 +64,12 @@ function run(req) {
   py.globals.set("_filename", req.filename || "main.py");
   py.globals.set("_src", req.source);
   py.globals.set("_extras", req.extras ? JSON.stringify(req.extras) : "");
+  // Live streaming: the driver's _StreamRedirect picks this JS callback up from globals and fires it per
+  // newline. postMessage is non-blocking here even though Python runs synchronously on this worker --
+  // the main thread drains its queue on its own, so log lines paint as the run progresses.
+  py.globals.set("_stream_line", (stream, line) => {
+    try { postMessage({ type: "stream", id: req.id, stream: String(stream), line: String(line) }); } catch {}
+  });
   const json = py.runPython("run_script(_filename, _src, _extras)");
   postMessage({ type: "result", id: req.id, json });
 }
