@@ -279,16 +279,35 @@ function deriveRouteInputs() {
 // --- demo / worker / run flow --------------------------------------------------------------------
 
 let examples = [];
+let currentExampleId = null;
 
-function populatePicker() {
-  const sel = $("example");
-  sel.innerHTML = "";
+// The examples tree is a flat list of demos rendered with the same row styling as the output trees,
+// so the visual language matches across all three tabs. Active example highlights blue; click loads
+// the source + sibling extras into the editor. No directories yet -- the list is small and grouping
+// would add a click cost without gaining information.
+function renderInputTree() {
+  const host = $("input-tree");
+  host.innerHTML = "";
+  if (examples.length === 0) return;
+  const ul = document.createElement("ul");
   for (const ex of examples) {
-    const o = document.createElement("option");
-    o.value = ex.id;
-    o.textContent = ex.label;
-    sel.appendChild(o);
+    const li = document.createElement("li");
+    const row = document.createElement("div");
+    row.className = "file" + (ex.id === currentExampleId ? " active" : "");
+    row.style.paddingLeft = "18px";
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.textContent = "•";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = ex.filename || `${ex.id}.py`;
+    name.title = ex.label || ex.filename || ex.id;
+    row.append(icon, name);
+    row.onclick = () => loadExample(ex.id);
+    li.appendChild(row);
+    ul.appendChild(li);
   }
+  host.appendChild(ul);
 }
 
 function loadExample(id) {
@@ -296,13 +315,13 @@ function loadExample(id) {
   if (!ex) return;
   setEditor(ex.source);
   currentFilename = ex.filename || `${ex.id}.py`;
+  currentExampleId = ex.id;
   $("src-filename").textContent = currentFilename;
   ed.session.clearAnnotations();
   ed.focus();
-  $("example").value = ex.id;
+  renderInputTree();
   clearOutput();
 }
-$("example").onchange = () => loadExample($("example").value);
 
 const worker = new Worker("worker.js");
 let ready = false;
@@ -318,7 +337,7 @@ worker.onmessage = (e) => {
     case "ready":
       ready = true;
       examples = m.examples || [];
-      populatePicker();
+      renderInputTree();
       if (!editorTouched && examples.length) loadExample(examples[0].id);
       $("engine").textContent = m.versions;
       logMsg("engine ready · " + m.versions, "ok");
@@ -427,7 +446,7 @@ $("run").onclick = () => {
   clearOutput();
 
   // Extras follow the loaded example so cross-file demos (e.g. ekf1_stateful imports ekf1_stateless) resolve.
-  const currentExample = examples.find((e) => e.id === $("example").value);
+  const currentExample = examples.find((e) => e.id === currentExampleId);
   const req = {
     type: "run",
     id: ++reqId,

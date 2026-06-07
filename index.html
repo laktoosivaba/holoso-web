@@ -145,15 +145,14 @@ select {
 </nav>
 
 <div class="view active" id=view-input>
-  <div class="pane fill" id=src-pane>
-    <h2>
-      <span id=src-filename>src.py</span>
-      <span class=grow></span>
-      <label>example
-        <select id=example title="load a demo kernel into the editor"></select>
-      </label>
-    </h2>
-    <div id=src-editor class=editor></div>
+  <div class=split>
+    <div class=tree-pane>
+      <div id=input-tree class=tree></div>
+    </div>
+    <div class="pane fill" id=src-pane>
+      <h2><span id=src-filename>src.py</span></h2>
+      <div id=src-editor class=editor></div>
+    </div>
   </div>
   <div class=controls>
     <button id=run class=primary disabled title="run the script in your browser (Pyodide)">Run</button>
