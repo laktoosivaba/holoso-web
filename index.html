@@ -37,10 +37,17 @@ header .sub { color: #888; font-size: 0.85em; }
 .maintabs .grow { flex: 1; }
 .maintabs button { font-size: 0.9em; }
 .maintabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
-/* Action group on the right of the top nav: selects + buttons that used to live in view-input's controls
-   row and view-resources's res-controls bar. Compact font/padding so the whole strip fits one row. */
+/* Action groups on the right of the top nav: selects + buttons that used to live in view-input's
+   controls row and view-resources's res-controls bar. Compact font/padding so the whole strip fits
+   one row. display:contents lets each wrapper drop out of layout so its kids participate directly
+   in the maintabs flex; toggling the wrapper to display:none hides the whole group cleanly. */
 .maintabs label { display: flex; align-items: center; gap: 4px; font-size: 0.8em; color: #555; }
 .maintabs .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 4px; }
+.action-group { display: contents; }
+body[data-view=input] .resources-only,
+body[data-view=output] .input-only,
+body[data-view=output] .resources-only,
+body[data-view=resources] .input-only { display: none; }
 .view { display: none; }
 .view.active { display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-height: 0; }
 .pane.fill > h2, .pane.fill > .tabs { flex: 0 0 auto; }
@@ -83,6 +90,10 @@ header .sub { color: #888; font-size: 0.85em; }
 }
 .tree .dir:hover, .tree .file:hover:not(.disabled) { background: var(--bg-alt); }
 .tree .file.active { background: var(--accent); color: white; }
+/* Active row hover would otherwise fall to the grey :hover rule (higher specificity due to two
+   pseudo-classes vs. one extra class) and leave white text on grey -- pin the active hover to a
+   darker blue, same fix pattern as .maintabs button.active:hover. */
+.tree .file.active:hover:not(.disabled) { background: var(--accent-hov); color: white; }
 .tree .file.disabled { color: #aaa; cursor: not-allowed; }
 .tree .chev { display: inline-block; width: 12px; color: #888; flex: 0 0 12px; }
 .tree .icon { width: 14px; text-align: center; flex: 0 0 14px; color: #888; }
@@ -155,30 +166,33 @@ select {
   <button id=tab-output>Output</button>
   <button id=tab-resources>Resources</button>
   <span class=grow></span>
-  <button id=run class=success disabled title="run the script in your browser (Pyodide)">Run</button>
-  <span class=sep></span>
-  <label>target
-    <select id=arch title="synthesis target for the resource estimate">
-      <option value=generic>generic (gates)</option>
-      <option value=ecp5>Lattice ECP5</option>
-      <option value=xilinx>Xilinx 7-series</option>
-      <option value=ice40>Lattice iCE40</option>
-    </select>
-  </label>
-  <button id=estimate disabled title="run Yosys in your browser on the selected .v (downloads ~50 MB on first use)">Estimate</button>
-  <span class=sep></span>
-  <label>ECP5
-    <select id=ecp5-die title="ECP5 device — logic / DSP / BRAM capacity">
-      <option value="--12k">12k</option>
-      <option value="--25k">25k</option>
-      <option value="--45k">45k</option>
-      <option value="--85k" selected>85k</option>
-    </select>
-  </label>
-  <label>package
-    <select id=ecp5-pkg title="package — pin count / number of I/O pads"></select>
-  </label>
-  <button id=route disabled title="place &amp; route on Lattice ECP5 for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
+  <span class="action-group input-only">
+    <button id=run class=success disabled title="run the script in your browser (Pyodide)">Run</button>
+  </span>
+  <span class="action-group resources-only">
+    <label>target
+      <select id=arch title="synthesis target for the resource estimate">
+        <option value=generic>generic (gates)</option>
+        <option value=ecp5>Lattice ECP5</option>
+        <option value=xilinx>Xilinx 7-series</option>
+        <option value=ice40>Lattice iCE40</option>
+      </select>
+    </label>
+    <button id=estimate disabled title="run Yosys in your browser on the selected .v (downloads ~50 MB on first use)">Estimate</button>
+    <span class=sep></span>
+    <label>ECP5
+      <select id=ecp5-die title="ECP5 device — logic / DSP / BRAM capacity">
+        <option value="--12k">12k</option>
+        <option value="--25k">25k</option>
+        <option value="--45k">45k</option>
+        <option value="--85k" selected>85k</option>
+      </select>
+    </label>
+    <label>package
+      <select id=ecp5-pkg title="package — pin count / number of I/O pads"></select>
+    </label>
+    <button id=route disabled title="place &amp; route on Lattice ECP5 for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
+  </span>
 </nav>
 
 <div class="view active" id=view-input>

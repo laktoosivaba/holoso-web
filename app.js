@@ -80,6 +80,9 @@ function switchView(name) {
     views[k].classList.toggle("active", k === name);
     tabBtns[k].classList.toggle("active", k === name);
   }
+  // Drives the body[data-view=…] CSS selector that hides/shows the per-view action group on the right
+  // of the top nav (Run on input, Estimate/Route + selects on resources, nothing on output).
+  document.body.dataset.view = name;
   // Ace lays out at zero size while its container is display:none, so re-measure on reveal.
   if (name === "input") ed.resize();
   else if (name === "output") out.resize();
@@ -675,6 +678,7 @@ $("route").onclick = () => {
 setEditor(BOOT_HINT);
 clearOutput();
 $("run").disabled = true;
+document.body.dataset.view = "input";
 logMsg("booting Pyodide engine — first load downloads the runtime + numpy + sympy (tens of MB)…", "dim");
 worker.postMessage({ type: "init" });
 ensureYosys();
