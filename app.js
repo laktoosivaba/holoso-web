@@ -1,8 +1,18 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const PLACEHOLDER = "// run Synthesize to populate";
+const PLACEHOLDER = "// run a script to populate";
 const BOOT_HINT = "# loading demo kernels — the engine is still starting…\n";
+
+// File extension -> Ace mode. ext absent or unmapped -> "text".
+const EXT_TO_MODE = {
+  v: "verilog", vh: "verilog", sv: "verilog", svh: "verilog",
+  vhd: "vhdl", vhdl: "vhdl",
+  py: "python", json: "json",
+  html: "html", htm: "html",
+  txt: "text", log: "text", csv: "text", md: "markdown", rpt: "text",
+};
+const extToMode = (ext) => EXT_TO_MODE[ext] || "text";
 
 function logMsg(msg, cls) {
   const ts = new Date().toTimeString().slice(0, 8);
@@ -11,6 +21,12 @@ function logMsg(msg, cls) {
   span.textContent = `[${ts}] ${msg}\n`;
   $("log").appendChild(span);
   $("log").scrollTop = $("log").scrollHeight;
+}
+
+// Mirror Python's stream contents into the log, one line per timestamp, classed for stdout vs stderr.
+function logStreams(stdout, stderr) {
+  for (const line of (stdout || "").split("\n")) if (line) logMsg(line, "dim");
+  for (const line of (stderr || "").split("\n")) if (line) logMsg(line, "err");
 }
 
 const ed = ace.edit("src-editor");
@@ -32,10 +48,8 @@ const outEl = $("out-editor");
 const frame = $("out-frame");
 const resEl = $("out-resources");
 
-// The editors now flex to fill their panes, so keep Ace's internal size in sync with the viewport.
 window.addEventListener("resize", () => { ed.resize(); out.resize(); });
 
-// Top-level views: "input" (editor + format controls) and "output" (generated files + resource estimate).
 const views = { input: $("view-input"), output: $("view-output") };
 const tabBtns = { input: $("tab-input"), output: $("tab-output") };
 
@@ -45,15 +59,14 @@ function switchView(name) {
     views[k].classList.toggle("active", k === name);
     tabBtns[k].classList.toggle("active", k === name);
   }
-  // Ace lays out at zero size while its container is display:none, so resize the one we just revealed.
   (name === "input" ? ed : out).resize();
 }
 $("tab-input").onclick = () => switchView("input");
 $("tab-output").onclick = () => switchView("output");
 
 let files = [];
-let active = 0;
-let lastResult = null;
+let active = -1;
+let currentFilename = "src.py";
 
 function showText() { outEl.style.display = ""; frame.style.display = "none"; resEl.style.display = "none"; }
 function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; resEl.style.display = "none"; }
@@ -61,8 +74,7 @@ function showResources() { outEl.style.display = "none"; frame.style.display = "
 
 function clearOutput() {
   files = [];
-  active = 0;
-  lastResult = null;
+  active = -1;
   $("out-tabs").innerHTML = "";
   showText();
   out.setValue(PLACEHOLDER, -1);
@@ -82,15 +94,14 @@ function selectTab(i) {
     frame.srcdoc = f.content;
   } else {
     showText();
-    out.session.setMode("ace/mode/" + (f.mode || "text"));
-    out.setValue(f.content, -1);
+    out.session.setMode("ace/mode/" + f.mode);
+    out.setValue(f.encoding === "base64" ? "(binary — download to view)" : f.content, -1);
     out.resize();
   }
   renderTabs();
 }
 
-// "resources" is a pseudo-tab (active === "res"): not a generated file, so it isn't in `files` and isn't
-// downloadable — it just reveals the Yosys estimate UI in the same content area.
+// "resources" is a pseudo-tab (active === "res"): reveals the Yosys estimate UI in the same content area.
 function selectResources() {
   active = "res";
   showResources();
@@ -100,38 +111,48 @@ function selectResources() {
 function renderTabs() {
   const host = $("out-tabs");
   host.innerHTML = "";
+  if (files.length === 0) return;
   files.forEach((f, i) => {
     const b = document.createElement("button");
-    b.textContent = f.name;
+    b.textContent = f.path;
+    b.title = f.path;
     if (i === active) b.classList.add("active");
     b.onclick = () => selectTab(i);
     host.appendChild(b);
-    // Slot the "resources" pseudo-tab right after the report (files[0]), before the source files.
-    if (i === 0) {
-      const rb = document.createElement("button");
-      rb.textContent = "resources";
-      rb.title = "in-browser Yosys estimate / ECP5 place-and-route";
-      if (active === "res") rb.classList.add("active");
-      rb.onclick = () => selectResources();
-      host.appendChild(rb);
-    }
   });
+  // The resources pseudo-tab lives at the end of the strip so the natural reading order is
+  // "what the script wrote" first, then "how would this place on hardware" last.
+  const rb = document.createElement("button");
+  rb.textContent = "resources";
+  rb.title = "in-browser Yosys estimate / ECP5 place-and-route on the active .v tab";
+  if (active === "res") rb.classList.add("active");
+  rb.onclick = () => selectResources();
+  host.appendChild(rb);
+
   const onFile = typeof active === "number" && !!files[active];
   $("download").disabled = !onFile;
   $("download-all").disabled = files.length === 0;
 }
 
-function setEntryOptions(targets, chosen) {
-  const sel = $("entry");
-  const want = chosen || sel.value;
-  sel.innerHTML = '<option value="">(auto)</option>';
-  for (const t of targets || []) {
-    const o = document.createElement("option");
-    o.value = t;
-    o.textContent = t;
-    sel.appendChild(o);
-  }
-  sel.value = (targets || []).includes(want) ? want : "";
+// The Estimate/Route buttons operate on whichever .v the user is looking at; falling back to the first .v
+// keeps a sensible default when they're parked on the report or testbench tab. holoso_support.v is the
+// sibling RTL the synthesizer always co-emits, so pick it from the same directory as the chosen .v.
+function activeVerilogFile() {
+  if (typeof active === "number" && files[active]?.ext === "v") return files[active];
+  for (const f of files) if (f.ext === "v" && !f.path.endsWith("holoso_support.v")) return f;
+  for (const f of files) if (f.ext === "v") return f;
+  return null;
+}
+
+function deriveRouteInputs() {
+  const f = activeVerilogFile();
+  if (!f) return null;
+  const slash = f.path.lastIndexOf("/");
+  const dir = slash >= 0 ? f.path.slice(0, slash) : "";
+  const supportPath = dir ? `${dir}/holoso_support.v` : "holoso_support.v";
+  const support = files.find((x) => x.path === supportPath);
+  const top = f.path.slice(slash + 1).replace(/\.v$/, "");
+  return { top, verilog: f.content, support: support?.content || "" };
 }
 
 let examples = [];
@@ -151,10 +172,11 @@ function loadExample(id) {
   const ex = examples.find((e) => e.id === id) || examples[0];
   if (!ex) return;
   setEditor(ex.source);
+  currentFilename = ex.filename || `${ex.id}.py`;
+  $("src-filename").textContent = currentFilename;
   ed.session.clearAnnotations();
   ed.focus();
   $("example").value = ex.id;
-  setEntryOptions([], "");
   clearOutput();
 }
 $("example").onchange = () => loadExample($("example").value);
@@ -178,7 +200,7 @@ worker.onmessage = (e) => {
       $("engine").textContent = m.versions;
       logMsg("engine ready · " + m.versions, "ok");
       logMsg(`${examples.length} demo kernels loaded`, "dim");
-      $("synth").disabled = false;
+      $("run").disabled = false;
       break;
     case "fatal":
       $("engine").textContent = "engine failed to start";
@@ -190,8 +212,16 @@ worker.onmessage = (e) => {
   }
 };
 
+// Initial tab pick after a successful run: prefer the last .html (deepest report, e.g. the wide e8m36 config
+// in ekf1_stateful), else the last .v, else the first emitted file. Empty file list -> just show stdout.
+function pickInitialTab(files) {
+  for (let i = files.length - 1; i >= 0; i--) if (files[i].kind === "html") return i;
+  for (let i = files.length - 1; i >= 0; i--) if (files[i].ext === "v") return i;
+  return files.length > 0 ? 0 : -1;
+}
+
 function onResult(jsonStr) {
-  $("synth").disabled = false;
+  $("run").disabled = false;
   ed.session.clearAnnotations();
   let r;
   try {
@@ -200,34 +230,34 @@ function onResult(jsonStr) {
     logMsg("malformed result from engine", "err");
     return;
   }
-  if (r.targets) setEntryOptions(r.targets, r.target);
+
+  // Stream output goes to the log regardless of ok/fail -- partial stdout up to the error is useful diagnostic.
+  logStreams(r.stdout, r.stderr);
 
   if (r.ok) {
-    const mod = r.module_name;
-    // Report first (the default tab — it's the most useful view), then the .v/testbench sources.
-    // The "resources" pseudo-tab is slotted between them in renderTabs().
-    files = [
-      { name: mod + ".html", content: r.report_html, kind: "html" },
-      { name: mod + ".v", content: r.verilog, kind: "text", mode: "verilog" },
-      { name: "holoso_support.v", content: r.support, kind: "text", mode: "verilog" },
-      { name: "test_" + mod + ".py", content: r.testbench, kind: "text", mode: "python" },
-    ];
-    lastResult = { top: mod, verilog: r.verilog, support: r.support };
-    $("estimate").disabled = false;
-    $("route").disabled = false;
-    selectTab(0);
-    const mt = r.metrics || {};
-    const stateBlurb = mt.state_slots ? ` · ${mt.state_slots} state slot${mt.state_slots === 1 ? "" : "s"}` : "";
-    logMsg(
-      `synthesized ${r.target} → ${mod}.v · ${mt.operator_instances} · ${mt.float_regs} float regs · ` +
-        `${mt.steps} steps · II ${mt.ii_cycles} cyc · chain ${mt.max_chain_len}${stateBlurb}`,
-      "ok"
-    );
-    if (mt.state_slots && mt.state_slot_names?.length) {
-      logMsg(`  state: ${mt.state_slot_names.join(", ")}`, "dim");
+    files = (r.files || []).map((f) => ({
+      path: f.path,
+      content: f.content,
+      ext: f.ext,
+      kind: (f.ext === "html" || f.ext === "htm") ? "html" : "text",
+      mode: extToMode(f.ext),
+      encoding: f.encoding,
+    }));
+    const tab = pickInitialTab(files);
+    const haveVerilog = files.some((f) => f.ext === "v");
+    $("estimate").disabled = !haveVerilog;
+    $("route").disabled = !haveVerilog;
+    if (tab >= 0) {
+      selectTab(tab);
+    } else {
+      $("out-tabs").innerHTML = "";
+      showText();
+      out.setValue("// script ran but emitted no files — see log for stdout/stderr", -1);
+      $("download").disabled = true;
+      $("download-all").disabled = true;
     }
+    logMsg(`ran ${currentFilename} · ${files.length} file${files.length === 1 ? "" : "s"} emitted`, "ok");
   } else {
-    // Synthesis failed: go back to the input view so the source annotation / cursor jump is visible.
     switchView("input");
     showText();
     out.setValue(PLACEHOLDER, -1);
@@ -237,7 +267,7 @@ function onResult(jsonStr) {
 
 function reportError(err) {
   const lines = (err.message || "").split("\n").filter(Boolean);
-  const tail = lines[lines.length - 1] || "synthesis failed";
+  const tail = lines[lines.length - 1] || "script failed";
   logMsg(`${err.kind || "error"}: ${tail}`, "err");
 
   const loc = err.location;
@@ -247,38 +277,33 @@ function reportError(err) {
     if (loc.line) logMsg(`  L${loc.lineno}: ${String(loc.line).trim()}`, "dim");
     ed.gotoLine(row + 1, loc.col || 0, true);
     ed.focus();
-  } else if (err.kind === "InternalError") {
+  } else if (err.kind === "InternalError" || err.kind === "BadRequest") {
     logMsg(err.message, "dim");
   }
 }
 
-$("synth").onclick = () => {
+$("run").onclick = () => {
   if (!ready) {
     logMsg("engine not ready yet", "err");
     return;
   }
-  $("synth").disabled = true;
+  $("run").disabled = true;
   clearOutput();
 
-  // Extras travel with the currently-loaded example so cross-file demos (e.g. iir1_hpf needs iir1_lpf) import cleanly;
-  // user-edited source is the main module, sibling files are loaded verbatim from demos/.
+  // Extras follow the loaded example so cross-file demos (e.g. ekf1_stateful imports ekf1_stateless) resolve.
   const currentExample = examples.find((e) => e.id === $("example").value);
   const req = {
-    type: "synth",
+    type: "run",
     id: ++reqId,
+    filename: currentFilename,
     source: ed.getValue(),
-    wexp: parseInt($("wexp").value, 10),
-    wman: parseInt($("wman").value, 10),
-    entry: $("entry").value,
     extras: currentExample?.extras || {},
   };
-  logMsg(`POST synth (wexp=${req.wexp} wman=${req.wman}${req.entry ? " entry=" + req.entry : ""})`);
+  logMsg(`POST run ${currentFilename}`);
   worker.postMessage(req);
 
-  // The output view is where results land — jump there now and show progress; onResult fills it (or bounces
-  // back to the input view on error).
   switchView("output");
-  out.setValue("// synthesizing…", -1);
+  out.setValue("// running…", -1);
   out.resize();
 };
 
@@ -292,30 +317,45 @@ function triggerDownload(name, blob) {
   URL.revokeObjectURL(a.href);
 }
 
+function activeFileBlob(f) {
+  if (f.encoding === "base64") {
+    const raw = atob(f.content);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return new Blob([arr], { type: "application/octet-stream" });
+  }
+  return new Blob([f.content], { type: f.kind === "html" ? "text/html" : "text/plain" });
+}
+
 $("download").onclick = () => {
   const f = files[active];
   if (!f) return;
-  triggerDownload(f.name, new Blob([f.content], { type: f.kind === "html" ? "text/html" : "text/plain" }));
+  const leaf = f.path.split("/").pop();
+  triggerDownload(leaf, activeFileBlob(f));
 };
 
-// Bundle every output tab plus the Kulibin support RTL into one .tar.gz, so the download is a self-contained,
-// synthesizable source set rather than file-by-file. nanotar is imported lazily — only when this is used.
+// Bundle every emitted file (preserving relative paths) plus the Kulibin support RTL into one .tar.gz, so
+// the download is a self-contained, synthesizable source set. nanotar is imported lazily.
 $("download-all").onclick = async () => {
-  if (!files.length || !lastResult || $("download-all").disabled) return;
+  if (!files.length || $("download-all").disabled) return;
   const btn = $("download-all");
   const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = "bundling…";
   try {
-    const entries = files.map((f) => ({ name: f.name, data: f.content }));
+    const entries = files.map((f) => ({
+      name: f.path,
+      data: f.encoding === "base64" ? Uint8Array.from(atob(f.content), (c) => c.charCodeAt(0)) : f.content,
+    }));
     const manifest = await (await fetch("hdl/kulibin/manifest.json")).json();
     for (const n of manifest) {
       entries.push({ name: "kulibin/float/hdl/" + n, data: await (await fetch("hdl/kulibin/" + n)).text() });
     }
     const { createTarGzip } = await import("./nanotar.js");
     const gz = await createTarGzip(entries);
-    triggerDownload(`${lastResult.top}.tar.gz`, new Blob([gz], { type: "application/gzip" }));
-    logMsg(`bundled ${entries.length} files → ${lastResult.top}.tar.gz`, "ok");
+    const stem = currentFilename.replace(/\.py$/, "") || "bundle";
+    triggerDownload(`${stem}.tar.gz`, new Blob([gz], { type: "application/gzip" }));
+    logMsg(`bundled ${entries.length} files → ${stem}.tar.gz`, "ok");
   } catch (e) {
     logMsg("bundle failed: " + (e.message || e), "err");
   } finally {
@@ -326,8 +366,6 @@ $("download-all").onclick = async () => {
 
 const ARCH_LABEL = { generic: "generic gates", ecp5: "Lattice ECP5", xilinx: "Xilinx 7-series", ice40: "Lattice iCE40" };
 
-// Valid ECP5 die→package combinations (probed from nextpnr-ecp5; bad combos are rejected at route time).
-// Packages are ordered most-pads-first via PAD_RANK so the default selection maximizes available I/O pads.
 const ECP5_PKGS = {
   "--12k": ["CABGA256", "CABGA381", "CSFBGA285", "TQFP144"],
   "--25k": ["CABGA256", "CABGA381", "CSFBGA285", "TQFP144"],
@@ -345,15 +383,15 @@ function populatePackages() {
     o.value = o.textContent = p;
     sel.appendChild(o);
   }
-  sel.value = pkgs[0]; // always default to the most-pads package for the chosen die (user can override after)
+  sel.value = pkgs[0];
 }
 $("ecp5-die").onchange = populatePackages;
 populatePackages();
 let yosysWorker = null;
-let busy = false; // Estimate and Route share the one wasm worker queue + the #resources panel, so gate both.
+let busy = false;
 let yosysReady = false;
 
-const RES_HINT = '<span class="dim">synthesize a kernel, then estimate gate/FPGA resources</span>';
+const RES_HINT = '<span class="dim">run a script that emits a .v file, then estimate gate/FPGA resources</span>';
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
@@ -376,11 +414,11 @@ function renderResources(m) {
 
 function finishResources() {
   busy = false;
-  $("estimate").disabled = !lastResult;
-  $("route").disabled = !lastResult;
+  const haveVerilog = files.some((f) => f.ext === "v");
+  $("estimate").disabled = !haveVerilog;
+  $("route").disabled = !haveVerilog;
 }
 
-// Post-route report: headline Fmax, device utilization, and the Fmax-limiting critical path.
 function renderPnr(m) {
   const rep = m.report || {};
   const top = rep.fmax && rep.fmax[0];
@@ -443,7 +481,8 @@ function ensureYosys() {
 }
 
 $("estimate").onclick = () => {
-  if (!lastResult || busy) return;
+  const inputs = deriveRouteInputs();
+  if (!inputs || busy) return;
   busy = true;
   $("estimate").disabled = true;
   $("route").disabled = true;
@@ -451,17 +490,16 @@ $("estimate").onclick = () => {
   ensureYosys().postMessage({
     type: "estimate",
     id: ++reqId,
-    top: lastResult.top,
-    verilog: lastResult.verilog,
-    support: lastResult.support,
+    top: inputs.top,
+    verilog: inputs.verilog,
+    support: inputs.support,
     target: $("arch").value,
   });
 };
 
-// Route is ECP5-only (the one nextpnr we ship) and independent of the histogram target: synth_ecp5 then
-// place&route on the 85k for real Fmax + post-route utilization. First click pulls ~170 MB of chipdb.
 $("route").onclick = () => {
-  if (!lastResult || busy) return;
+  const inputs = deriveRouteInputs();
+  if (!inputs || busy) return;
   busy = true;
   $("estimate").disabled = true;
   $("route").disabled = true;
@@ -469,9 +507,9 @@ $("route").onclick = () => {
   ensureYosys().postMessage({
     type: "route",
     id: ++reqId,
-    top: lastResult.top,
-    verilog: lastResult.verilog,
-    support: lastResult.support,
+    top: inputs.top,
+    verilog: inputs.verilog,
+    support: inputs.support,
     device: $("ecp5-die").value,
     pkg: $("ecp5-pkg").value,
   });
@@ -479,8 +517,8 @@ $("route").onclick = () => {
 
 setEditor(BOOT_HINT);
 clearOutput();
-$("synth").disabled = true;
+$("run").disabled = true;
 $("engine").textContent = "starting engine…";
 logMsg("booting Pyodide engine — first load downloads the runtime + numpy + sympy (tens of MB)…", "dim");
 worker.postMessage({ type: "init" });
-ensureYosys(); // start downloading + warming yosys now so Estimate is instant later (~50 MB, cached after)
+ensureYosys();
