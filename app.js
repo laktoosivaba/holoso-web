@@ -332,7 +332,6 @@ worker.onmessage = (e) => {
   const m = e.data;
   switch (m.type) {
     case "status":
-      $("engine").textContent = m.msg;
       logMsg(m.msg, "dim");
       break;
     case "ready":
@@ -340,13 +339,11 @@ worker.onmessage = (e) => {
       examples = m.examples || [];
       renderInputTree();
       if (!editorTouched && examples.length) loadExample(examples[0].id);
-      $("engine").textContent = m.versions;
       logMsg("engine ready · " + m.versions, "ok");
       logMsg(`${examples.length} demo kernels loaded`, "dim");
       $("run").disabled = false;
       break;
     case "fatal":
-      $("engine").textContent = "engine failed to start";
       logMsg("engine init failed: " + m.msg, "err");
       break;
     case "stream":
@@ -678,7 +675,6 @@ $("route").onclick = () => {
 setEditor(BOOT_HINT);
 clearOutput();
 $("run").disabled = true;
-$("engine").textContent = "starting engine…";
 logMsg("booting Pyodide engine — first load downloads the runtime + numpy + sympy (tens of MB)…", "dim");
 worker.postMessage({ type: "init" });
 ensureYosys();

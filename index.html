@@ -16,6 +16,8 @@
   --log-ok: #75d65f;
   --log-warn: #e6c25f;
   --log-dim: #888;
+  --success: #28a745;
+  --success-hov: #218838;
 }
 * { box-sizing: border-box; }
 body {
@@ -31,10 +33,14 @@ header .sub { color: #888; font-size: 0.85em; }
 .pane { border: 1px solid var(--bd); border-radius: 4px; margin: 0; overflow: hidden; background: white; flex: 0 0 auto; }
 .pane.fill { display: flex; flex-direction: column; min-height: 0; }
 #src-pane { flex: 1 1 0; }
-.maintabs { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+.maintabs { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; flex-wrap: wrap; }
 .maintabs .grow { flex: 1; }
 .maintabs button { font-size: 0.9em; }
 .maintabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
+/* Action group on the right of the top nav: selects + buttons that used to live in view-input's controls
+   row and view-resources's res-controls bar. Compact font/padding so the whole strip fits one row. */
+.maintabs label { display: flex; align-items: center; gap: 4px; font-size: 0.8em; color: #555; }
+.maintabs .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 4px; }
 .view { display: none; }
 .view.active { display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-height: 0; }
 .pane.fill > h2, .pane.fill > .tabs { flex: 0 0 auto; }
@@ -67,7 +73,9 @@ header .sub { color: #888; font-size: 0.85em; }
   background: var(--bg); border-top: 1px solid var(--bd);
 }
 .tree-footer button { font-size: 0.8em; padding: 3px 9px; flex: 1 1 0; }
-.tree ul { list-style: none; margin: 0; padding: 0; }
+/* min-width:max-content lets ul (and its rows) size to the widest leaf rather than the visible pane,
+   so the active highlight's background fills the whole row when the tree is horizontally scrolled. */
+.tree ul { list-style: none; margin: 0; padding: 0; min-width: max-content; }
 .tree li { margin: 0; padding: 0; }
 .tree .dir, .tree .file {
   display: flex; align-items: center; gap: 4px; padding: 2px 6px 2px 4px;
@@ -95,12 +103,6 @@ header .sub { color: #888; font-size: 0.85em; }
   border-radius: 3px; background: white;
 }
 .res-target-bar .target.empty { color: #999; font-style: italic; }
-.res-controls {
-  flex: 0 0 auto; display: flex; gap: 10px; align-items: center; padding: 6px 10px;
-  background: var(--bg); border-top: 1px solid var(--bd); flex-wrap: wrap;
-}
-.res-controls .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 2px; }
-.res-controls label { display: flex; align-items: center; gap: 5px; font-size: 0.8em; }
 #resources { flex: 1 1 0; min-height: 0; padding: 8px 10px; font-size: 0.85em; overflow: auto; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
@@ -110,17 +112,13 @@ button:hover:not(:disabled) { background: var(--bg-alt); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: var(--accent); color: white; border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent-hov); border-color: var(--accent-hov); }
+button.success { background: var(--success); color: white; border-color: var(--success); }
+button.success:hover:not(:disabled) { background: var(--success-hov); border-color: var(--success-hov); }
 /* Active maintab is blue (.maintabs button.active). Generic button:hover has matching specificity but
    trails in source order, so it overrides to grey -- making the white text unreadable on hover. Pin
    the hover state explicitly to keep it blue. */
 .maintabs button.active:hover:not(:disabled) {
   background: var(--accent-hov); border-color: var(--accent-hov); color: white;
-}
-.controls { display: flex; gap: 14px; align-items: center; margin: 0 4px; flex-wrap: wrap; flex: 0 0 auto; }
-.controls label { display: flex; align-items: center; gap: 5px; }
-.controls input[type=number] {
-  width: 4.5em; padding: 4px 6px; font: inherit; font-size: 0.9em;
-  border: 1px solid #999; border-radius: 3px;
 }
 select {
   padding: 3px 6px; font: inherit; font-size: 0.8em;
@@ -157,7 +155,30 @@ select {
   <button id=tab-output>Output</button>
   <button id=tab-resources>Resources</button>
   <span class=grow></span>
-  <span class=sub id=engine>starting engine…</span>
+  <button id=run class=success disabled title="run the script in your browser (Pyodide)">Run</button>
+  <span class=sep></span>
+  <label>target
+    <select id=arch title="synthesis target for the resource estimate">
+      <option value=generic>generic (gates)</option>
+      <option value=ecp5>Lattice ECP5</option>
+      <option value=xilinx>Xilinx 7-series</option>
+      <option value=ice40>Lattice iCE40</option>
+    </select>
+  </label>
+  <button id=estimate disabled title="run Yosys in your browser on the selected .v (downloads ~50 MB on first use)">Estimate</button>
+  <span class=sep></span>
+  <label>ECP5
+    <select id=ecp5-die title="ECP5 device — logic / DSP / BRAM capacity">
+      <option value="--12k">12k</option>
+      <option value="--25k">25k</option>
+      <option value="--45k">45k</option>
+      <option value="--85k" selected>85k</option>
+    </select>
+  </label>
+  <label>package
+    <select id=ecp5-pkg title="package — pin count / number of I/O pads"></select>
+  </label>
+  <button id=route disabled title="place &amp; route on Lattice ECP5 for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
 </nav>
 
 <div class="view active" id=view-input>
@@ -169,9 +190,6 @@ select {
       <h2><span id=src-filename>src.py</span></h2>
       <div id=src-editor class=editor></div>
     </div>
-  </div>
-  <div class=controls>
-    <button id=run class=primary disabled title="run the script in your browser (Pyodide)">Run</button>
   </div>
 </div>
 
@@ -199,30 +217,6 @@ select {
     <div class=preview-pane>
       <div class=res-target-bar><span id=res-target class="target empty">no .v selected</span></div>
       <div id=resources><span class=dim>run a script that emits a .v file, then estimate gate/FPGA resources</span></div>
-      <div class=res-controls>
-        <label>target
-          <select id=arch title="synthesis target for the resource estimate">
-            <option value=generic>generic (gates)</option>
-            <option value=ecp5>Lattice ECP5</option>
-            <option value=xilinx>Xilinx 7-series</option>
-            <option value=ice40>Lattice iCE40</option>
-          </select>
-        </label>
-        <button id=estimate disabled title="run Yosys in your browser on the selected .v (downloads ~50 MB on first use)">Estimate</button>
-        <span class=sep></span>
-        <label>ECP5
-          <select id=ecp5-die title="ECP5 device — logic / DSP / BRAM capacity">
-            <option value="--12k">12k</option>
-            <option value="--25k">25k</option>
-            <option value="--45k">45k</option>
-            <option value="--85k" selected>85k</option>
-          </select>
-        </label>
-        <label>package
-          <select id=ecp5-pkg title="package — pin count / number of I/O pads"></select>
-        </label>
-        <button id=route disabled title="place &amp; route on Lattice ECP5 for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
-      </div>
     </div>
   </div>
 </div>
