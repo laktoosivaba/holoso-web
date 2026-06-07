@@ -12,7 +12,9 @@ const DEMOS = WEB + "demos";
 function loadDemos() {
   return JSON.parse(readFileSync(`${DEMOS}/manifest.json`, "utf8")).map((d) => ({
     id: d.id,
+    filename: d.file,
     source: readFileSync(`${DEMOS}/${d.file}`, "utf8"),
+    extras: Object.fromEntries((d.extras || []).map((n) => [n, readFileSync(`${DEMOS}/${n}`, "utf8")])),
   }));
 }
 
@@ -41,12 +43,15 @@ try {
   check(true, `runtime up · ${v}`);
   const demos = loadDemos();
   check(demos.length >= 5, `demos load (${demos.length})`);
-  // Pick madd specifically: smallest stateless kernel, no extras, guaranteed to synthesize across upstream churn.
+  // Pick madd: smallest kernel with its own main() that synthesizes + writes to build/madd/, guaranteed across upstream churn.
   const probe = demos.find((d) => d.id === "madd") || demos[0];
+  py.globals.set("_f", probe.filename);
   py.globals.set("_s", probe.source);
-  py.globals.set("_x", "{}");
-  const r = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '', _x)"));
-  check(r.ok === true, `synthesize ${probe.id} via vendored runtime (${r.ok ? r.metrics.steps + " steps" : r.error.kind})`);
+  py.globals.set("_x", JSON.stringify(probe.extras || {}));
+  const r = JSON.parse(py.runPython("run_script(_f, _s, _x)"));
+  const stem = probe.filename.replace(/\.py$/, "");
+  const haveVerilog = r.ok && r.files.some((f) => f.ext === "v" && f.path.startsWith(`build/${stem}/`));
+  check(haveVerilog, `run ${probe.id} via vendored runtime (${r.ok ? r.files.length + " files" : r.error?.kind})`);
 
   log(`\n=== ${failures ? failures + " FAILURE(S)" : "VENDORED RUNTIME OK"} ===`);
   process.exit(failures ? 1 : 0);

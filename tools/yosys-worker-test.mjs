@@ -23,9 +23,23 @@ const DEMOS = WEB + "demos";
 const loadDemos = () =>
   JSON.parse(readFileSync(`${DEMOS}/manifest.json`, "utf8")).map((d) => ({
     id: d.id,
+    filename: d.file,
     source: readFileSync(`${DEMOS}/${d.file}`, "utf8"),
     extras: Object.fromEntries((d.extras || []).map((n) => [n, readFileSync(`${DEMOS}/${n}`, "utf8")])),
   }));
+
+// Pull the synthesizable .v + sibling holoso_support.v out of a run_script result, mirroring the app's
+// deriveRouteInputs: skip the support file when picking the top module, then find support in the same dir.
+function pickVerilog(files) {
+  const verilogs = files.filter((f) => f.ext === "v");
+  const main = verilogs.find((f) => !f.path.endsWith("holoso_support.v")) || verilogs[0];
+  if (!main) return null;
+  const dir = main.path.includes("/") ? main.path.slice(0, main.path.lastIndexOf("/")) : "";
+  const supportPath = dir ? `${dir}/holoso_support.v` : "holoso_support.v";
+  const support = files.find((f) => f.path === supportPath);
+  const top = main.path.slice(main.path.lastIndexOf("/") + 1).replace(/\.v$/, "");
+  return { top, verilog: main.content, support: support?.content || "" };
+}
 
 const log = (...a) => process.stdout.write(a.join(" ") + "\n");
 let failures = 0;
@@ -64,32 +78,42 @@ try {
   log("yosys " + (await import("@yowasp/yosys")).version + "\n");
 
   const demos = loadDemos();
-  const constProbe = { id: "const_probe", source: "def k(x):\n    return x * 2.5 + 1.0\n", extras: {} };
-  // Demos vendored from upstream that the frontend does not yet synthesize; the picker still shows them but
-  // they reach the user as a synth error, not a yosys input. Mirror the driver_test EXPECTED_FAIL set.
-  const KNOWN_BROKEN = new Set(["iir1_lpf", "iir1_hpf", "finite_set_current_controller"]);
+  // Upstream demos that define a kernel but ship no main() -- run_script succeeds but emits no files,
+  // so there is no yosys-side contract to check here. Skip rather than count as a failure.
+  const NO_MAIN = new Set(["iir1_lpf", "iir1_hpf", "finite_set_current_controller"]);
 
-  for (const d of [...demos, constProbe]) {
-    if (KNOWN_BROKEN.has(d.id)) { log(`  skip ${d.id}: known-broken upstream example`); continue; }
-    py.globals.set("_s", d.source);
-    py.globals.set("_x", JSON.stringify(d.extras || {}));
-    const r = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '', _x)"));
-    if (!r.ok) { check(false, `${d.id}: synth failed (${r.error?.kind})`); continue; }
-    check(typeof r.support === "string" && r.support.includes("holoso_fadd"), `${d.id}: result carries holoso_support.v`);
-    const counts = await run(r.module_name, r.verilog, r.support, "generic");
+  const exec = (filename, source, extras) => {
+    py.globals.set("_f", filename);
+    py.globals.set("_s", source);
+    py.globals.set("_x", JSON.stringify(extras || {}));
+    return JSON.parse(py.runPython("run_script(_f, _s, _x)"));
+  };
+
+  for (const d of demos) {
+    if (NO_MAIN.has(d.id)) { log(`  skip ${d.id}: kernel-only, no main() to run`); continue; }
+    const r = exec(d.filename, d.source, d.extras);
+    if (!r.ok) { check(false, `${d.id}: script failed (${r.error?.kind})`); continue; }
+    const v = pickVerilog(r.files);
+    if (!v) { check(false, `${d.id}: no .v emitted (${r.files.map((f) => f.path).join(", ") || "no files"})`); continue; }
+    check(v.support.includes("holoso_fadd"), `${d.id}: sibling holoso_support.v co-emitted`);
+    const counts = await run(v.top, v.verilog, v.support, "generic");
     const total = counts && Object.values(counts).reduce((a, b) => a + b, 0);
     check(counts && total > 0, `${d.id}: generic netlist has cells (${total})`);
   }
 
-  // dot2 is web-only and no longer exists post-auto-vendor; arch sweep now uses madd (smallest stateless kernel).
+  // Arch sweep uses madd: smallest stateless kernel with its own main(), stable across upstream churn.
   log("\n--- arch sweep on madd (write_json cell types) ---");
-  py.globals.set("_s", demos.find((d) => d.id === "madd").source);
-  py.globals.set("_x", "{}");
-  const madd = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '', _x)"));
-  for (const [target, dspRe] of [["ecp5", /MULT18X18D/], ["xilinx", /DSP48E1/], ["ice40", /SB_LUT4/]]) {
-    const counts = await run(madd.module_name, madd.verilog, madd.support, target);
-    const keys = Object.keys(counts || {});
-    check(keys.some((k) => dspRe.test(k)), `madd/${target}: netlist has ${dspRe.source} (${keys.filter((k) => dspRe.test(k)).map((k) => k + "=" + counts[k]).join(",") || "MISSING"})`);
+  const maddDemo = demos.find((d) => d.id === "madd");
+  const maddRun = exec(maddDemo.filename, maddDemo.source, maddDemo.extras);
+  const maddV = pickVerilog(maddRun.files);
+  if (!maddV) {
+    check(false, `madd produced no .v (${maddRun.error?.kind || maddRun.files.map((f) => f.path).join(", ")})`);
+  } else {
+    for (const [target, dspRe] of [["ecp5", /MULT18X18D/], ["xilinx", /DSP48E1/], ["ice40", /SB_LUT4/]]) {
+      const counts = await run(maddV.top, maddV.verilog, maddV.support, target);
+      const keys = Object.keys(counts || {});
+      check(keys.some((k) => dspRe.test(k)), `madd/${target}: netlist has ${dspRe.source} (${keys.filter((k) => dspRe.test(k)).map((k) => k + "=" + counts[k]).join(",") || "MISSING"})`);
+    }
   }
 
   log(`\n=== ${failures ? failures + " FAILURE(S)" : "WORKER PATH OK"} ===`);

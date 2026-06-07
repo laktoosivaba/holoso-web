@@ -28,9 +28,23 @@ const DEMOS = WEB + "demos";
 const loadDemos = () =>
   JSON.parse(readFileSync(`${DEMOS}/manifest.json`, "utf8")).map((d) => ({
     id: d.id,
+    filename: d.file,
     source: readFileSync(`${DEMOS}/${d.file}`, "utf8"),
     extras: Object.fromEntries((d.extras || []).map((n) => [n, readFileSync(`${DEMOS}/${n}`, "utf8")])),
   }));
+
+// Mirror app.js deriveRouteInputs: from the run_script result, return {top, verilog, support} for the
+// first non-support .v emitted, with sibling holoso_support.v from the same directory.
+function pickVerilog(files) {
+  const verilogs = files.filter((f) => f.ext === "v");
+  const main = verilogs.find((f) => !f.path.endsWith("holoso_support.v")) || verilogs[0];
+  if (!main) return null;
+  const dir = main.path.includes("/") ? main.path.slice(0, main.path.lastIndexOf("/")) : "";
+  const supportPath = dir ? `${dir}/holoso_support.v` : "holoso_support.v";
+  const support = files.find((f) => f.path === supportPath);
+  const top = main.path.slice(main.path.lastIndexOf("/") + 1).replace(/\.v$/, "");
+  return { top, verilog: main.content, support: support?.content || "" };
+}
 
 const log = (...a) => process.stdout.write(a.join(" ") + "\n");
 let failures = 0;
@@ -80,17 +94,20 @@ try {
   log("yosys " + (await import("@yowasp/yosys")).version + " · nextpnr-ecp5 " + (await import("@yowasp/nextpnr-ecp5")).version + "\n");
 
   const demos = loadDemos();
-  const synth = (id) => {
+  const runDemo = (id) => {
     const d = demos.find((x) => x.id === id);
+    py.globals.set("_f", d.filename);
     py.globals.set("_s", d.source);
     py.globals.set("_x", JSON.stringify(d.extras || {}));
-    return JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '', _x)"));
+    return JSON.parse(py.runPython("run_script(_f, _s, _x)"));
   };
 
   // 1. small kernel routes and yields real timing/area.
-  const madd = synth("madd");
-  check(madd.ok, "madd synthesized");
-  const r = await routeOnce(madd.module_name, madd.verilog, madd.support);
+  const maddRun = runDemo("madd");
+  check(maddRun.ok, "madd ran");
+  const madd = pickVerilog(maddRun.files);
+  check(madd != null, "madd emitted a .v");
+  const r = await routeOnce(madd.top, madd.verilog, madd.support);
   check(r.report != null, "madd produced a parseable PnR report");
   const fmax = r.report?.fmax?.[0]?.achieved;
   check(typeof fmax === "number" && fmax > 0, `madd Fmax reported (${fmax ? fmax.toFixed(1) + " MHz" : "MISSING"})`);
@@ -98,11 +115,13 @@ try {
   check(r.report?.criticalPath?.ns > 0, `madd critical path delay (${r.report?.criticalPath?.ns?.toFixed(2)} ns, ${r.report?.criticalPath?.segments} segs)`);
 
   // 2. wide kernel overflows I/O pads -> nextpnr fails, log names TRELLIS_IO.
-  const ekf = synth("ekf1_stateless");
-  check(ekf.ok, "ekf1_stateless synthesized");
+  const ekfRun = runDemo("ekf1_stateless");
+  check(ekfRun.ok, "ekf1_stateless ran");
+  const ekf = pickVerilog(ekfRun.files);
+  check(ekf != null, "ekf1_stateless emitted a .v");
   let threw = false, padOverflow = false;
   try {
-    await routeOnce(ekf.module_name, ekf.verilog, ekf.support);
+    await routeOnce(ekf.top, ekf.verilog, ekf.support);
   } catch (e) {
     threw = true;
     padOverflow = /TRELLIS_IO/.test(e.log || "");
