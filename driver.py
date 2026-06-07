@@ -1,213 +1,228 @@
-"""In-browser synthesis driver, run inside Pyodide.
+"""In-browser script runner, executed inside Pyodide.
 
-Defines ``synth_to_json``: take the user's Python source as text, materialize it as a real module on the (in-memory)
-filesystem so ``inspect.getsource`` works, locate the target (function or bound class method), run
-``holoso.synthesize``, and return a JSON string the JS layer renders. Pure data in, JSON out -- no DOM, no globals
-beyond a per-call module counter -- so it is exercised identically by ``worker.js`` (browser) and ``tools/`` (Node),
-the single source of synth logic.
+Defines ``run_script``: take the user's Python source (and any sibling files), materialize them under ``/user/``,
+exec the main file as ``__main__`` (the same way ``python <file>`` does on disk), capture stdout/stderr, and
+return a JSON envelope listing every file the script created. Pure data in, JSON out -- no DOM, no globals --
+so the worker (browser) and ``tools/`` (Node) hit the same code path.
 
-A unique module name per call (``holoso_user_<n>``) gives every run a distinct ``__file__`` -> linecache stays
-correct across edits, and importlib never serves a stale cached module.
-
-Stateful targets land here as ``ClassName`` or ``ClassName.method`` entries: the driver instantiates ``ClassName()``
-no-args and passes the bound method to ``synthesize`` (its ``__self__`` snapshot seeds the reset state,
-``__func__`` is the analyzed method). Demos that need a sibling file (e.g. ``iir1_hpf`` imports ``IIR1LPF``)
-ride along as ``extras`` written to ``/user/`` before the main module is imported.
-
-The demo kernels shown in the picker are static source files in this repo (``demos/``), listed by the worker --
-they are not part of the holoso wheel, so this driver never imports them.
+Upstream demos already ship a ``main()`` that builds an ``OpConfig``, calls ``holoso.synthesize(...)``, and writes
+the result to ``Path(__file__).resolve().parent / "build" / Path(__file__).stem``. The runner just needs to be
+faithful to ``__main__`` semantics (``__name__ == "__main__"``, ``__file__`` set, cwd is the script dir) and
+diff the filesystem before/after to surface the new files for the UI to render.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib
-import inspect
+import io
 import json
+import linecache
+import os
 import pathlib
 import sys
 import traceback
 import types
 
 _USER_DIR = pathlib.Path("/user")
-_counter = 0
+_TEXT_EXTS = frozenset({"v", "vh", "sv", "svh", "vhd", "vhdl", "html", "htm", "txt", "json", "py", "log", "csv", "md", "rpt"})
 
 
-_SKIP_NAMES = frozenset({"main"})  # CLI entry points in upstream examples; never a synth target.
+def _validate_filename(name: str) -> str | None:
+    """Return None if ``name`` is a safe leaf filename ending in .py; else a short reason."""
+    if not isinstance(name, str) or not name:
+        return "missing filename"
+    if not name.endswith(".py"):
+        return "filename must end in .py"
+    if "/" in name or "\\" in name or name.startswith("."):
+        return "filename must be a bare leaf (no path separator, no leading dot)"
+    return None
 
 
-def _module_targets(module: types.ModuleType) -> list[str]:
-    """
-    Synthesis candidates in the module, in definition order. Plain functions appear as ``"name"``; class methods
-    appear as ``"ClassName.method"`` for each ``__call__`` or non-underscore method defined directly on the class.
-    Classes with no synth-eligible method (pure dataclasses, helper types) are skipped. CLI entry-point names
-    in ``_SKIP_NAMES`` (e.g. ``main``) are filtered: upstream examples ship a runnable ``main()`` next to the kernel,
-    and the picker would otherwise default to it.
-    """
-    out: list[str] = []
-    for name, obj in vars(module).items():
-        if getattr(obj, "__module__", None) != module.__name__:
-            continue
-        if name in _SKIP_NAMES:
-            continue
-        if isinstance(obj, types.FunctionType):
-            out.append(name)
-        elif inspect.isclass(obj):
-            for mname, mobj in vars(obj).items():
-                if not isinstance(mobj, types.FunctionType):
-                    continue
-                if mname == "__call__" or not mname.startswith("_"):
-                    out.append(f"{name}.{mname}")
-    return out
-
-
-def _resolve_target(module: types.ModuleType, target_name: str):
-    """
-    Return a callable suitable for ``synthesize``: a plain function for ``"name"`` entries, or a bound method
-    for ``"ClassName.method"`` entries (constructed via no-args ``ClassName()``).
-    """
-    if "." in target_name:
-        cls_name, method_name = target_name.split(".", 1)
-        cls = getattr(module, cls_name)
-        instance = cls()
-        return getattr(instance, method_name)
-    return getattr(module, target_name)
-
-
-def _error(kind: str, message: str, **extra: object) -> str:
-    return json.dumps({"ok": False, "error": {"kind": kind, "message": message}, **extra})
+def _error(kind: str, message: str, **extra: object) -> dict[str, object]:
+    return {"kind": kind, "message": message, **extra}
 
 
 def _user_location(user_file: pathlib.Path) -> dict[str, object] | None:
-    """Pull the last traceback frame inside the user's module file, so an import-time crash annotates the right line."""
-    import linecache
-
+    """Return the deepest traceback frame inside the user's main file, for Ace annotation."""
     frames = traceback.extract_tb(sys.exc_info()[2])
     hits = [f for f in frames if f.filename == str(user_file)]
     if not hits:
         return None
     frame = hits[-1]
     line = frame.line or linecache.getline(str(user_file), frame.lineno or 0)
-    return {"lineno": frame.lineno, "col": 0, "line": line.rstrip("\n")}
+    return {"lineno": frame.lineno, "col": 0, "line": (line or "").rstrip("\n")}
 
 
-def _default_ops(wexp: int, wman: int):
-    """Build the default per-operator configuration: every float operator at the requested ZKF format, no extra
-    pipeline stages. holoso.synthesize requires an explicit OpConfig; the web always synthesizes the bare kernel."""
-    from holoso import FAddOperator, FDivOperator, FMulILog2OperatorFamily, FMulOperator, FloatFormat, OpConfig
+def _format_holoso_error(exc, user_file: pathlib.Path) -> dict[str, object]:
+    err: dict[str, object] = {"kind": type(exc).__name__, "message": getattr(exc, "message", str(exc))}
+    loc = getattr(exc, "location", None)
+    if loc is not None:
+        err["location"] = {"lineno": loc.lineno, "col": loc.col, "line": loc.line}
+    else:
+        ul = _user_location(user_file)
+        if ul is not None:
+            err["location"] = ul
+    err["traceback"] = traceback.format_exc()
+    return err
 
-    fmt = FloatFormat(wexp=int(wexp), wman=int(wman))
-    return OpConfig(
-        fadd=FAddOperator(fmt),
-        fmul=FMulOperator(fmt),
-        fdiv=FDivOperator(fmt),
-        fmul_ilog2=FMulILog2OperatorFamily(fmt),
-    )
+
+def _format_exec_error(user_file: pathlib.Path) -> dict[str, object]:
+    exc_type = sys.exc_info()[0]
+    kind = exc_type.__name__ if exc_type else "RuntimeError"
+    err: dict[str, object] = {"kind": kind, "message": traceback.format_exc()}
+    loc = _user_location(user_file)
+    if loc is not None:
+        err["location"] = loc
+    return err
 
 
-def synth_to_json(source: str, wexp: int, wman: int, entry: str = "", name: str = "", extras: str = "") -> str:
-    """
-    Synthesize ``source`` and return a JSON result envelope (see module docstring).
-
-    ``extras`` is an optional JSON-encoded ``{filename: content}`` map of sibling files written to ``/user/``
-    before the main module is imported -- used by cross-file demos like ``iir1_hpf`` (imports ``iir1_lpf``).
-    Each extras filename must end in ``.py`` and is written verbatim, so the importable name is the filename stem.
-    """
-    from collections import Counter
-
-    from holoso import HolosoError, synthesize
-
-    global _counter
-    _counter += 1
-    mod_name = f"holoso_user_{_counter}"
-    _USER_DIR.mkdir(exist_ok=True)
-
-    if extras:
-        try:
-            extras_map = json.loads(extras)
-            if not isinstance(extras_map, dict):
-                raise TypeError("extras must be a JSON object")
-        except Exception as exc:
-            return _error("BadRequest", f"extras is not valid JSON: {exc}")
-        for fname, content in extras_map.items():
-            if not isinstance(fname, str) or not fname.endswith(".py") or "/" in fname or fname.startswith("."):
-                return _error("BadRequest", f"invalid extras filename {fname!r}")
-            if not isinstance(content, str):
-                return _error("BadRequest", f"extras[{fname!r}] is not a string")
-            (_USER_DIR / fname).write_text(content, encoding="utf-8")
-
-    user_file = _USER_DIR / f"{mod_name}.py"
-    user_file.write_text(source, encoding="utf-8")
-    if str(_USER_DIR) not in sys.path:
-        sys.path.insert(0, str(_USER_DIR))
+def _purge_user_modules() -> None:
+    """Drop any module whose ``__file__`` lives under /user/ so re-runs see edits, not cached bytecode."""
+    user_prefix = str(_USER_DIR) + "/"
+    for mod_name in list(sys.modules):
+        mod = sys.modules.get(mod_name)
+        mod_file = getattr(mod, "__file__", None) or ""
+        if mod_file.startswith(user_prefix):
+            del sys.modules[mod_name]
+    linecache.clearcache()
     importlib.invalidate_caches()
 
+
+def _snapshot(root: pathlib.Path, exclude: set[str]) -> dict[str, tuple[int, int]]:
+    """Recursive (relpath -> (mtime_ns, size)) walk; relpath excluded set names use forward slashes from root."""
+    out: dict[str, tuple[int, int]] = {}
+    if not root.exists():
+        return out
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel in exclude:
+            continue
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        out[rel] = (st.st_mtime_ns, st.st_size)
+    return out
+
+
+def _read_artifact(path: pathlib.Path) -> dict[str, object]:
+    """Return ``{path, ext, content}`` for an emitted file. Binary files come back base64-encoded with encoding='base64'."""
+    rel = path.relative_to(_USER_DIR).as_posix()
+    ext = path.suffix.lower().lstrip(".")
+    raw = path.read_bytes()
+    if ext in _TEXT_EXTS:
+        try:
+            return {"path": rel, "ext": ext, "content": raw.decode("utf-8")}
+        except UnicodeDecodeError:
+            pass
+    import base64
+    return {"path": rel, "ext": ext, "content": base64.b64encode(raw).decode("ascii"), "encoding": "base64"}
+
+
+def _collect_new(before: dict[str, tuple[int, int]], after: dict[str, tuple[int, int]]) -> list[dict[str, object]]:
+    artifacts: list[dict[str, object]] = []
+    for rel, stamp in sorted(after.items()):
+        if before.get(rel) == stamp:
+            continue
+        path = _USER_DIR / rel
+        try:
+            artifacts.append(_read_artifact(path))
+        except OSError as exc:
+            artifacts.append({"path": rel, "ext": path.suffix.lower().lstrip("."), "error": str(exc)})
+    return artifacts
+
+
+def run_script(filename: str, source: str, extras: str = "") -> str:
+    """
+    Run ``source`` as if it were ``python /user/<filename>``, with sibling files from ``extras`` (JSON
+    ``{filename: content}``) materialized alongside. Returns a JSON envelope::
+
+        {"ok": true,  "stdout": "...", "stderr": "...", "files": [{path, ext, content}, ...]}
+        {"ok": false, "error": {kind, message, location?}, "stdout": "...", "stderr": "...", "files": [...]}
+
+    ``files`` lists every file under ``/user/`` whose mtime/size changed during the run, excluding the
+    main script and any sibling extras we placed ourselves. Paths are relative to ``/user/``.
+    """
+    if (reason := _validate_filename(filename)) is not None:
+        return json.dumps({"ok": False, "error": _error("BadRequest", reason), "stdout": "", "stderr": "", "files": []})
+
+    extras_map: dict[str, str] = {}
+    if extras:
+        try:
+            parsed = json.loads(extras)
+            if not isinstance(parsed, dict):
+                raise TypeError("extras must be a JSON object")
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": _error("BadRequest", f"extras is not valid JSON: {exc}"), "stdout": "", "stderr": "", "files": []})
+        for fname, content in parsed.items():
+            if (reason := _validate_filename(fname)) is not None:
+                return json.dumps({"ok": False, "error": _error("BadRequest", f"extras[{fname!r}]: {reason}"), "stdout": "", "stderr": "", "files": []})
+            if not isinstance(content, str):
+                return json.dumps({"ok": False, "error": _error("BadRequest", f"extras[{fname!r}] is not a string"), "stdout": "", "stderr": "", "files": []})
+            extras_map[fname] = content
+
+    _USER_DIR.mkdir(exist_ok=True)
+    user_file = _USER_DIR / filename
+    user_file.write_text(source, encoding="utf-8")
+    for fname, content in extras_map.items():
+        (_USER_DIR / fname).write_text(content, encoding="utf-8")
+
+    if str(_USER_DIR) not in sys.path:
+        sys.path.insert(0, str(_USER_DIR))
+    _purge_user_modules()
+
+    own_inputs = {filename, *extras_map.keys()}
+    before = _snapshot(_USER_DIR, own_inputs)
+
+    module = types.ModuleType("__main__")
+    module.__file__ = str(user_file)
+    module.__name__ = "__main__"
+    module.__package__ = None
+    # Replace sys.modules['__main__'] for the duration of the run so user code's "if __name__ == '__main__'"
+    # works and so dataclasses introspection (which looks up the defining module via sys.modules) sees ours.
+    previous_main = sys.modules.get("__main__")
+    sys.modules["__main__"] = module
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    error: dict[str, object] | None = None
+    prev_cwd = os.getcwd()
     try:
-        module = importlib.import_module(mod_name)
-    except Exception:
-        err: dict[str, object] = {"kind": "ImportError", "message": traceback.format_exc()}
-        loc = _user_location(user_file)
-        if loc is not None:
-            err["location"] = loc
-        return json.dumps({"ok": False, "error": err, "targets": []})
+        os.chdir(str(_USER_DIR))
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+            try:
+                from holoso import HolosoError
+            except Exception:
+                HolosoError = ()  # holoso missing -> only generic exceptions caught below
+            try:
+                code = compile(user_file.read_text(encoding="utf-8"), str(user_file), "exec")
+                exec(code, module.__dict__)
+            except SystemExit as exc:
+                if exc.code not in (None, 0, "0"):
+                    error = _format_exec_error(user_file)
+            except HolosoError as exc:  # type: ignore[misc]
+                error = _format_holoso_error(exc, user_file)
+            except BaseException:
+                error = _format_exec_error(user_file)
+    finally:
+        os.chdir(prev_cwd)
+        if previous_main is not None:
+            sys.modules["__main__"] = previous_main
+        else:
+            sys.modules.pop("__main__", None)
 
-    candidates = _module_targets(module)
-    target_name = entry.strip() or (candidates[-1] if candidates else "")
-    if not target_name:
-        return _error("NoTarget", "no top-level function or class found to synthesize", targets=candidates)
-    if target_name not in candidates:
-        return _error("BadEntry", f"entry {target_name!r} not found among {candidates}", targets=candidates)
+    after = _snapshot(_USER_DIR, own_inputs)
+    files = _collect_new(before, after)
 
-    try:
-        target = _resolve_target(module, target_name)
-    except Exception:
-        return json.dumps(
-            {
-                "ok": False,
-                "error": {"kind": "ConstructError", "message": traceback.format_exc()},
-                "targets": candidates,
-                "target": target_name,
-            }
-        )
-
-    try:
-        result = synthesize(target, ops=_default_ops(wexp, wman), name=(name.strip() or None))
-    except HolosoError as exc:
-        err = {"kind": type(exc).__name__, "message": getattr(exc, "message", str(exc))}
-        loc = getattr(exc, "location", None)
-        if loc is not None:
-            err["location"] = {"lineno": loc.lineno, "col": loc.col, "line": loc.line}
-        return json.dumps({"ok": False, "error": err, "targets": candidates, "target": target_name})
-    except Exception:
-        return json.dumps(
-            {"ok": False, "error": {"kind": "InternalError", "message": traceback.format_exc()}, "targets": candidates}
-        )
-
-    # Post-synthesis figures live on the numerical model's Lir (the only public handle that carries them); the
-    # support RTL comes back as a name->text map alongside the generated module.
-    lir = result.numerical_model.lir
-    support = result.verilog_output.support_files
-    counts = Counter(inst.operator.mnemonic for inst in lir.float_instances)
-    instances = " ".join(f"{n}×{m}" for m, n in sorted(counts.items()))
-    state_slot_names = [slot.name for slot in lir.float_state_slots]
-    return json.dumps(
-        {
-            "ok": True,
-            "targets": candidates,
-            "target": target_name,
-            "module_name": result.module_name,
-            "verilog": result.verilog_output.verilog,
-            "support": support.get("holoso_support.v", ""),
-            "testbench": result.cocotb_output.testbench,
-            "report_html": result.html_output.html,
-            "metrics": {
-                "operator_instances": instances or "-",
-                "float_regs": lir.float_regfile.nreg,
-                "steps": lir.makespan,
-                "ii_cycles": lir.initiation_interval,
-                "op_count": lir.op_count,
-                "max_chain_len": lir.max_chain_len,
-                "state_slots": len(state_slot_names),
-                "state_slot_names": state_slot_names,
-            },
-        }
-    )
+    envelope: dict[str, object] = {
+        "ok": error is None,
+        "stdout": stdout_buf.getvalue(),
+        "stderr": stderr_buf.getvalue(),
+        "files": files,
+    }
+    if error is not None:
+        envelope["error"] = error
+    return json.dumps(envelope)
