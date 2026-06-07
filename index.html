@@ -114,23 +114,16 @@ select {
 <div class="view active" id=view-input>
   <div class="pane fill" id=src-pane>
     <h2>
-      <span>src.py</span>
+      <span id=src-filename>src.py</span>
       <span class=grow></span>
       <label>example
         <select id=example title="load a demo kernel into the editor"></select>
-      </label>
-      <label>entry
-        <select id=entry title="which function to synthesize (auto = last defined)">
-          <option value="">(auto)</option>
-        </select>
       </label>
     </h2>
     <div id=src-editor class=editor></div>
   </div>
   <div class=controls>
-    <label>wexp <input id=wexp type=number value=8 min=2 max=15 step=1></label>
-    <label>wman <input id=wman type=number value=24 min=4 max=52 step=1></label>
-    <button id=synth class=primary disabled>Synthesize</button>
+    <button id=run class=primary disabled title="run the script in your browser (Pyodide)">Run</button>
   </div>
 </div>
 
