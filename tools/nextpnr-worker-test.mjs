@@ -3,8 +3,8 @@
 // Kulibin RTL the browser worker fetches. Mirrors yosys-worker-test.mjs.
 //
 // Two contracts:
-//   - a small kernel (dot2) places, routes, and yields a positive Fmax + non-empty utilization,
-//   - a wide kernel (ekf_update) overflows the package's I/O pads -> nextpnr fails, and the failure log
+//   - a small kernel (madd) places, routes, and yields a positive Fmax + non-empty utilization,
+//   - a wide kernel (ekf1_stateless) overflows the package's I/O pads -> nextpnr fails, and the failure log
 //     names TRELLIS_IO (the pad-overflow case the worker turns into a friendly runtime error).
 //
 // Heavy (~170 MB nextpnr chipdb download + real place&route): run on demand, not from `make test`.
@@ -28,6 +28,7 @@ const loadDemos = () =>
   JSON.parse(readFileSync(`${DEMOS}/manifest.json`, "utf8")).map((d) => ({
     id: d.id,
     source: readFileSync(`${DEMOS}/${d.file}`, "utf8"),
+    extras: Object.fromEntries((d.extras || []).map((n) => [n, readFileSync(`${DEMOS}/${n}`, "utf8")])),
   }));
 
 const log = (...a) => process.stdout.write(a.join(" ") + "\n");
@@ -67,7 +68,11 @@ try {
   const py = await loadPyodide();
   await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
   py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
-  await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
+  await py.runPythonAsync(
+    `import micropip\n` +
+      `await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)\n` +
+      `await micropip.install("jaxtyping")\n`
+  );
   py.runPython(readFileSync(DRIVER, "utf8"));
   log("yosys " + (await import("@yowasp/yosys")).version + " · nextpnr-ecp5 " + (await import("@yowasp/nextpnr-ecp5")).version + "\n");
 
@@ -75,22 +80,23 @@ try {
   const synth = (id) => {
     const d = demos.find((x) => x.id === id);
     py.globals.set("_s", d.source);
-    return JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '')"));
+    py.globals.set("_x", JSON.stringify(d.extras || {}));
+    return JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '', _x)"));
   };
 
   // 1. small kernel routes and yields real timing/area.
-  const dot2 = synth("dot2");
-  check(dot2.ok, "dot2 synthesized");
-  const r = await routeOnce(dot2.module_name, dot2.verilog, dot2.support);
-  check(r.report != null, "dot2 produced a parseable PnR report");
+  const madd = synth("madd");
+  check(madd.ok, "madd synthesized");
+  const r = await routeOnce(madd.module_name, madd.verilog, madd.support);
+  check(r.report != null, "madd produced a parseable PnR report");
   const fmax = r.report?.fmax?.[0]?.achieved;
-  check(typeof fmax === "number" && fmax > 0, `dot2 Fmax reported (${fmax ? fmax.toFixed(1) + " MHz" : "MISSING"})`);
-  check((r.report?.utilization?.length || 0) > 0, `dot2 utilization non-empty (${(r.report?.utilization || []).map((u) => u.type + "=" + u.used).join(",")})`);
-  check(r.report?.criticalPath?.ns > 0, `dot2 critical path delay (${r.report?.criticalPath?.ns?.toFixed(2)} ns, ${r.report?.criticalPath?.segments} segs)`);
+  check(typeof fmax === "number" && fmax > 0, `madd Fmax reported (${fmax ? fmax.toFixed(1) + " MHz" : "MISSING"})`);
+  check((r.report?.utilization?.length || 0) > 0, `madd utilization non-empty (${(r.report?.utilization || []).map((u) => u.type + "=" + u.used).join(",")})`);
+  check(r.report?.criticalPath?.ns > 0, `madd critical path delay (${r.report?.criticalPath?.ns?.toFixed(2)} ns, ${r.report?.criticalPath?.segments} segs)`);
 
   // 2. wide kernel overflows I/O pads -> nextpnr fails, log names TRELLIS_IO.
-  const ekf = synth("ekf_update");
-  check(ekf.ok, "ekf_update synthesized");
+  const ekf = synth("ekf1_stateless");
+  check(ekf.ok, "ekf1_stateless synthesized");
   let threw = false, padOverflow = false;
   try {
     await routeOnce(ekf.module_name, ekf.verilog, ekf.support);
@@ -98,8 +104,8 @@ try {
     threw = true;
     padOverflow = /TRELLIS_IO/.test(e.log || "");
   }
-  check(threw, "ekf_update PnR throws (does not silently succeed)");
-  check(padOverflow, "ekf_update failure is pad overflow (log names TRELLIS_IO)");
+  check(threw, "ekf1_stateless PnR throws (does not silently succeed)");
+  check(padOverflow, "ekf1_stateless failure is pad overflow (log names TRELLIS_IO)");
 
   log(`\n=== ${failures ? failures + " FAILURE(S)" : "PnR PATH OK"} ===`);
   process.exit(failures ? 1 : 0);

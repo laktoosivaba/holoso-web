@@ -6,9 +6,9 @@ PORT      ?= 8137
 YOSYS_GEN := tools/node_modules/@yowasp/yosys/gen
 NPNR_GEN  := tools/node_modules/@yowasp/nextpnr-ecp5/gen
 
-.PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-hdl test serve clean image deploy
+.PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples test serve clean image deploy
 
-dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl
+dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples
 	rm -rf $(DIST)
 	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/hdl $(DIST)/demos
 	cp $(STATIC) $(DIST)/
@@ -43,7 +43,10 @@ vendor-nextpnr: node-deps
 vendor-hdl:
 	node tools/vendor-hdl.mjs $(SYNTH)
 
-test: wheel vendor vendor-hdl
+vendor-examples:
+	node tools/vendor-examples.mjs $(SYNTH)
+
+test: wheel vendor vendor-hdl vendor-examples
 	cd tools && npm run test && npm run vendor:check && npm run test:closure
 
 serve:

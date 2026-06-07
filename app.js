@@ -217,11 +217,15 @@ function onResult(jsonStr) {
     $("route").disabled = false;
     selectTab(0);
     const mt = r.metrics || {};
+    const stateBlurb = mt.state_slots ? ` · ${mt.state_slots} state slot${mt.state_slots === 1 ? "" : "s"}` : "";
     logMsg(
       `synthesized ${r.target} → ${mod}.v · ${mt.operator_instances} · ${mt.float_regs} float regs · ` +
-        `${mt.steps} steps · II ${mt.ii_cycles} cyc · chain ${mt.max_chain_len}`,
+        `${mt.steps} steps · II ${mt.ii_cycles} cyc · chain ${mt.max_chain_len}${stateBlurb}`,
       "ok"
     );
+    if (mt.state_slots && mt.state_slot_names?.length) {
+      logMsg(`  state: ${mt.state_slot_names.join(", ")}`, "dim");
+    }
   } else {
     // Synthesis failed: go back to the input view so the source annotation / cursor jump is visible.
     switchView("input");
@@ -256,6 +260,9 @@ $("synth").onclick = () => {
   $("synth").disabled = true;
   clearOutput();
 
+  // Extras travel with the currently-loaded example so cross-file demos (e.g. iir1_hpf needs iir1_lpf) import cleanly;
+  // user-edited source is the main module, sibling files are loaded verbatim from demos/.
+  const currentExample = examples.find((e) => e.id === $("example").value);
   const req = {
     type: "synth",
     id: ++reqId,
@@ -263,6 +270,7 @@ $("synth").onclick = () => {
     wexp: parseInt($("wexp").value, 10),
     wman: parseInt($("wman").value, 10),
     entry: $("entry").value,
+    extras: currentExample?.extras || {},
   };
   logMsg(`POST synth (wexp=${req.wexp} wman=${req.wman}${req.entry ? " entry=" + req.entry : ""})`);
   worker.postMessage(req);

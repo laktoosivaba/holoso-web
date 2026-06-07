@@ -27,16 +27,23 @@ try {
   const py = await loadPyodide({ indexURL: VENDOR });
   await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
   py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
-  await py.runPythonAsync(`import micropip; await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)`);
+  await py.runPythonAsync(
+    `import micropip\n` +
+      `await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)\n` +
+      `await micropip.install("jaxtyping")\n`
+  );
   py.runPython(readFileSync(DRIVER, "utf8"));
 
   const v = py.runPython("import numpy, scipy, sympy, holoso; f'numpy {numpy.__version__} scipy {scipy.__version__} sympy {sympy.__version__}'");
   check(true, `runtime up · ${v}`);
   const demos = loadDemos();
   check(demos.length >= 5, `demos load (${demos.length})`);
-  py.globals.set("_s", demos[0].source);
-  const r = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '')"));
-  check(r.ok === true, `synthesize ${demos[0].id} via vendored runtime (${r.ok ? r.metrics.steps + " steps" : r.error.kind})`);
+  // Pick madd specifically: smallest stateless kernel, no extras, guaranteed to synthesize across upstream churn.
+  const probe = demos.find((d) => d.id === "madd") || demos[0];
+  py.globals.set("_s", probe.source);
+  py.globals.set("_x", "{}");
+  const r = JSON.parse(py.runPython("synth_to_json(_s, 8, 24, '', '', _x)"));
+  check(r.ok === true, `synthesize ${probe.id} via vendored runtime (${r.ok ? r.metrics.steps + " steps" : r.error.kind})`);
 
   log(`\n=== ${failures ? failures + " FAILURE(S)" : "VENDORED RUNTIME OK"} ===`);
   process.exit(failures ? 1 : 0);

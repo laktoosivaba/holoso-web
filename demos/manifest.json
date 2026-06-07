@@ -1,8 +1,0 @@
-[
-  { "id": "dot2", "label": "dot2 — 2-vector dot product", "file": "dot2.py" },
-  { "id": "madd", "label": "madd — subtract, scale, multiply-add", "file": "madd.py" },
-  { "id": "cube", "label": "cube — a³ via multiplications", "file": "cube.py" },
-  { "id": "poly3", "label": "poly3 — cubic Horner polynomial", "file": "poly3.py" },
-  { "id": "blend", "label": "blend — divide then scaled add", "file": "blend.py" },
-  { "id": "ekf_update", "label": "ekf_update — EKF covariance/state update", "file": "ekf_update.py" }
-]
