@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const VENDOR = fileURLToPath(new URL("../pyodide/", import.meta.url));
 const WEB = fileURLToPath(new URL("../", import.meta.url));
 const WHEEL = WEB + "wheels/holoso-0.1.0-py3-none-any.whl";
+const EXTRA_WHEELS = WEB + "wheels";
 const DRIVER = WEB + "driver.py";
 const DEMOS = WEB + "demos";
 
@@ -26,12 +27,14 @@ try {
   log(`booting Pyodide from vendored dir: ${VENDOR}`);
   const py = await loadPyodide({ indexURL: VENDOR });
   await py.loadPackage(["micropip", "numpy", "scipy", "sympy"]);
-  py.FS.writeFile("/holoso-0.1.0-py3-none-any.whl", readFileSync(WHEEL));
-  await py.runPythonAsync(
-    `import micropip\n` +
-      `await micropip.install("emfs:/holoso-0.1.0-py3-none-any.whl", deps=False)\n` +
-      `await micropip.install("jaxtyping")\n`
-  );
+  const wheels = ["holoso-0.1.0-py3-none-any.whl"];
+  py.FS.writeFile("/" + wheels[0], readFileSync(WHEEL));
+  for (const name of JSON.parse(readFileSync(`${EXTRA_WHEELS}/extra-manifest.json`, "utf8"))) {
+    py.FS.writeFile("/" + name, readFileSync(`${EXTRA_WHEELS}/${name}`));
+    wheels.push(name);
+  }
+  const installs = wheels.map((n) => `await micropip.install("emfs:/${n}", deps=False)`).join("\n");
+  await py.runPythonAsync(`import micropip\n${installs}\n`);
   py.runPython(readFileSync(DRIVER, "utf8"));
 
   const v = py.runPython("import numpy, scipy, sympy, holoso; f'numpy {numpy.__version__} scipy {scipy.__version__} sympy {sympy.__version__}'");

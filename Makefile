@@ -6,13 +6,13 @@ PORT      ?= 8137
 YOSYS_GEN := tools/node_modules/@yowasp/yosys/gen
 NPNR_GEN  := tools/node_modules/@yowasp/nextpnr-ecp5/gen
 
-.PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples test serve clean image deploy
+.PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples vendor-jaxtyping test serve clean image deploy
 
-dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples
+dist: wheel vendor vendor-yosys vendor-nextpnr vendor-hdl vendor-examples vendor-jaxtyping
 	rm -rf $(DIST)
 	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/hdl $(DIST)/demos
 	cp $(STATIC) $(DIST)/
-	cp wheels/$(WHEEL) $(DIST)/wheels/
+	cp wheels/*.whl wheels/extra-manifest.json $(DIST)/wheels/
 	cp -R pyodide/. $(DIST)/pyodide/
 	cp -R yosys/. $(DIST)/yosys/
 	cp -R nextpnr-ecp5/. $(DIST)/nextpnr-ecp5/
@@ -46,7 +46,10 @@ vendor-hdl:
 vendor-examples:
 	node tools/vendor-examples.mjs $(SYNTH)
 
-test: wheel vendor vendor-hdl vendor-examples
+vendor-jaxtyping:
+	node tools/vendor-jaxtyping.mjs
+
+test: wheel vendor vendor-hdl vendor-examples vendor-jaxtyping
 	cd tools && npm run test && npm run vendor:check && npm run test:closure
 
 serve:
@@ -59,4 +62,4 @@ deploy:
 	act -W .github/workflows/deploy.yml
 
 clean:
-	rm -rf $(DIST) wheels/*.whl pyodide yosys nextpnr-ecp5 hdl tools/node_modules
+	rm -rf $(DIST) wheels/*.whl wheels/extra-manifest.json pyodide yosys nextpnr-ecp5 hdl demos tools/node_modules
