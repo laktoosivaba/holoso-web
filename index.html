@@ -48,10 +48,11 @@ header .sub { color: #888; font-size: 0.85em; }
 #out-frame { width: 100%; border: 0; background: white; display: none; }
 
 /* Output / Resources views share a "tree | preview" split. The tree pane is fixed-width on the left,
-   the preview pane (editor/iframe in Output; restoolbar + report in Resources) takes the rest. */
+   the preview pane (editor/iframe in Output; target chip + report + estimate controls in Resources)
+   takes the rest. */
 .split { display: flex; flex: 1 1 0; min-height: 0; gap: 8px; }
 .tree-pane {
-  flex: 0 0 260px; display: flex; flex-direction: column;
+  flex: 0 0 300px; display: flex; flex-direction: column;
   border: 1px solid var(--bd); border-radius: 4px; background: white; overflow: hidden;
 }
 .tree-pane > h2 { flex: 0 0 auto; }
@@ -78,19 +79,28 @@ header .sub { color: #888; font-size: 0.85em; }
 .tree .chev { display: inline-block; width: 12px; color: #888; flex: 0 0 12px; }
 .tree .icon { width: 14px; text-align: center; flex: 0 0 14px; color: #888; }
 .tree .file.active .icon { color: rgba(255, 255, 255, 0.85); }
-.tree .name { overflow: hidden; text-overflow: ellipsis; }
+/* Long names extend the row; .tree's overflow:auto exposes a horizontal scrollbar when needed.
+   Full path is also surfaced via title-tooltip on hover. */
+.tree .name { white-space: nowrap; }
 .preview-pane { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--bd); border-radius: 4px; overflow: hidden; }
 
-.restoolbar {
-  display: flex; gap: 10px; align-items: center; padding: 6px 10px; flex: 0 0 auto;
-  background: var(--bg); border-bottom: 1px solid var(--bd); flex-wrap: wrap;
+/* Resources preview-pane stack: target chip on top (single row, ellipsis on overflow), report in
+   the middle, action controls at the bottom (matches view-input's Run button placement). */
+.res-target-bar {
+  flex: 0 0 auto; padding: 6px 10px; background: var(--bg); border-bottom: 1px solid var(--bd);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.restoolbar .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 2px; }
-.restoolbar .target {
+.res-target-bar .target {
   font-size: 0.8em; color: #555; padding: 2px 8px; border: 1px solid var(--bd);
   border-radius: 3px; background: white;
 }
-.restoolbar .target.empty { color: #999; font-style: italic; }
+.res-target-bar .target.empty { color: #999; font-style: italic; }
+.res-controls {
+  flex: 0 0 auto; display: flex; gap: 10px; align-items: center; padding: 6px 10px;
+  background: var(--bg); border-top: 1px solid var(--bd); flex-wrap: wrap;
+}
+.res-controls .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 2px; }
+.res-controls label { display: flex; align-items: center; gap: 5px; font-size: 0.8em; }
 #resources { flex: 1 1 0; min-height: 0; padding: 8px 10px; font-size: 0.85em; overflow: auto; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
@@ -100,6 +110,12 @@ button:hover:not(:disabled) { background: var(--bg-alt); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: var(--accent); color: white; border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent-hov); border-color: var(--accent-hov); }
+/* Active maintab is blue (.maintabs button.active). Generic button:hover has matching specificity but
+   trails in source order, so it overrides to grey -- making the white text unreadable on hover. Pin
+   the hover state explicitly to keep it blue. */
+.maintabs button.active:hover:not(:disabled) {
+  background: var(--accent-hov); border-color: var(--accent-hov); color: white;
+}
 .controls { display: flex; gap: 14px; align-items: center; margin: 0 4px; flex-wrap: wrap; flex: 0 0 auto; }
 .controls label { display: flex; align-items: center; gap: 5px; }
 .controls input[type=number] {
@@ -181,9 +197,9 @@ select {
       <div id=resources-tree class=tree></div>
     </div>
     <div class=preview-pane>
-      <div class=restoolbar>
-        <span id=res-target class="target empty">no .v selected</span>
-        <span class=sep></span>
+      <div class=res-target-bar><span id=res-target class="target empty">no .v selected</span></div>
+      <div id=resources><span class=dim>run a script that emits a .v file, then estimate gate/FPGA resources</span></div>
+      <div class=res-controls>
         <label>target
           <select id=arch title="synthesis target for the resource estimate">
             <option value=generic>generic (gates)</option>
@@ -207,7 +223,6 @@ select {
         </label>
         <button id=route disabled title="place &amp; route on Lattice ECP5 for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
       </div>
-      <div id=resources><span class=dim>run a script that emits a .v file, then estimate gate/FPGA resources</span></div>
     </div>
   </div>
 </div>
