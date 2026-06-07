@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const PLACEHOLDER = "// run a script to populate";
 const BOOT_HINT = "# loading demo kernels — the engine is still starting…\n";
+const RES_HINT = '<span class="dim">run a script that emits a .v file, then estimate gate/FPGA resources</span>';
 
 // File extension -> Ace mode. ext absent or unmapped -> "text".
 const EXT_TO_MODE = {
@@ -46,12 +47,13 @@ const out = ace.edit("out-editor");
 out.setOptions({ fontFamily: "inherit", fontSize: 12, showPrintMargin: false, readOnly: true });
 const outEl = $("out-editor");
 const frame = $("out-frame");
-const resEl = $("out-resources");
 
 window.addEventListener("resize", () => { ed.resize(); out.resize(); });
 
-const views = { input: $("view-input"), output: $("view-output") };
-const tabBtns = { input: $("tab-input"), output: $("tab-output") };
+// Three top-level views: Python input (editor + Run), Output (file tree + emitted-file preview),
+// Resources (file tree filtered to .v + estimate/route).
+const views = { input: $("view-input"), output: $("view-output"), resources: $("view-resources") };
+const tabBtns = { input: $("tab-input"), output: $("tab-output"), resources: $("tab-resources") };
 
 function switchView(name) {
   if (!views[name]) return;
@@ -59,23 +61,35 @@ function switchView(name) {
     views[k].classList.toggle("active", k === name);
     tabBtns[k].classList.toggle("active", k === name);
   }
-  (name === "input" ? ed : out).resize();
+  // Ace lays out at zero size while its container is display:none, so re-measure on reveal.
+  if (name === "input") ed.resize();
+  else if (name === "output") out.resize();
 }
 $("tab-input").onclick = () => switchView("input");
 $("tab-output").onclick = () => switchView("output");
+$("tab-resources").onclick = () => switchView("resources");
 
+// Single shared model: the list of files the script emitted, plus two independent selections.
+// activeOutput indexes into files[] (any kind allowed); activeResources also indexes files[] but is
+// constrained to a .v entry (Estimate/Route disabled until one is selected).
 let files = [];
-let active = -1;
+let activeOutput = -1;
+let activeResources = -1;
 let currentFilename = "src.py";
+let treeRoot = null;
+let expanded = new Set();  // dir paths currently open; defaulting to "expand new dirs on creation"
 
-function showText() { outEl.style.display = ""; frame.style.display = "none"; resEl.style.display = "none"; }
-function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; resEl.style.display = "none"; }
-function showResources() { outEl.style.display = "none"; frame.style.display = "none"; resEl.style.display = "flex"; }
+function showText() { outEl.style.display = ""; frame.style.display = "none"; }
+function showFrame() { outEl.style.display = "none"; frame.style.display = "block"; }
 
 function clearOutput() {
   files = [];
-  active = -1;
-  $("out-tabs").innerHTML = "";
+  activeOutput = -1;
+  activeResources = -1;
+  treeRoot = null;
+  expanded = new Set();
+  $("output-tree").innerHTML = "";
+  $("resources-tree").innerHTML = "";
   showText();
   out.setValue(PLACEHOLDER, -1);
   frame.removeAttribute("srcdoc");
@@ -83,11 +97,107 @@ function clearOutput() {
   $("download-all").disabled = true;
   $("estimate").disabled = true;
   $("route").disabled = true;
+  $("res-target").className = "target empty";
+  $("res-target").textContent = "no .v selected";
   $("resources").innerHTML = RES_HINT;
 }
 
-function selectTab(i) {
-  active = i;
+// --- file tree ------------------------------------------------------------------------------------
+
+// Build a nested {name,type,path,children?} tree out of files[]; "" path = root. Side-effect: any new
+// directory is marked expanded (the user's collapse state persists across re-renders within one run).
+function buildTree(files) {
+  const root = { name: "", type: "dir", path: "", children: [] };
+  for (let i = 0; i < files.length; i++) {
+    const parts = files[i].path.split("/");
+    let node = root;
+    for (let j = 0; j < parts.length - 1; j++) {
+      const dirName = parts[j];
+      let child = node.children.find((c) => c.type === "dir" && c.name === dirName);
+      if (!child) {
+        const path = (node.path ? node.path + "/" : "") + dirName;
+        child = { name: dirName, type: "dir", path, children: [] };
+        node.children.push(child);
+        expanded.add(path);  // default newly-discovered dir to open
+      }
+      node = child;
+    }
+    node.children.push({ name: parts[parts.length - 1], type: "file", idx: i, path: files[i].path });
+  }
+  return root;
+}
+
+function renderNode(node, opts, depth) {
+  const li = document.createElement("li");
+  if (node.type === "dir") {
+    const row = document.createElement("div");
+    row.className = "dir";
+    row.style.paddingLeft = depth * 12 + 4 + "px";
+    const isOpen = expanded.has(node.path);
+    const chev = document.createElement("span");
+    chev.className = "chev";
+    chev.textContent = isOpen ? "▾" : "▸";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = node.name + "/";
+    row.append(chev, name);
+    row.onclick = () => {
+      if (isOpen) expanded.delete(node.path);
+      else expanded.add(node.path);
+      renderAllTrees();
+    };
+    li.appendChild(row);
+    if (isOpen) {
+      const ul = document.createElement("ul");
+      for (const child of node.children) ul.appendChild(renderNode(child, opts, depth + 1));
+      li.appendChild(ul);
+    }
+  } else {
+    const f = files[node.idx];
+    const enabled = opts.enabledExt(f);
+    const row = document.createElement("div");
+    row.className = "file" + (enabled ? "" : " disabled") + (node.idx === opts.activeIdx ? " active" : "");
+    row.style.paddingLeft = depth * 12 + 18 + "px";
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.textContent = "•";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.title = node.path;
+    name.textContent = node.name;
+    row.append(icon, name);
+    if (enabled) row.onclick = () => opts.onSelect(node.idx);
+    li.appendChild(row);
+  }
+  return li;
+}
+
+function renderTree(host, root, opts) {
+  host.innerHTML = "";
+  if (!root || root.children.length === 0) return;
+  const ul = document.createElement("ul");
+  for (const child of root.children) ul.appendChild(renderNode(child, opts, 0));
+  host.appendChild(ul);
+}
+
+function renderAllTrees() {
+  renderTree($("output-tree"), treeRoot, {
+    activeIdx: activeOutput,
+    enabledExt: () => true,
+    onSelect: setActiveOutput,
+  });
+  renderTree($("resources-tree"), treeRoot, {
+    activeIdx: activeResources,
+    enabledExt: (f) => f.ext === "v",
+    onSelect: setActiveResources,
+  });
+}
+
+// --- selection: Output preview pane ---------------------------------------------------------------
+
+function setActiveOutput(i) {
+  if (i < 0 || !files[i]) return;
+  activeOutput = i;
   const f = files[i];
   if (f.kind === "html") {
     showFrame();
@@ -98,55 +208,48 @@ function selectTab(i) {
     out.setValue(f.encoding === "base64" ? "(binary — download to view)" : f.content, -1);
     out.resize();
   }
-  renderTabs();
+  $("download").disabled = false;
+  // Auto-sync: a non-support .v opened in Output is almost always the one the user wants to estimate,
+  // so update the Resources target without a second click. Manual Resources picks aren't overridden.
+  if (f.ext === "v" && !f.path.endsWith("holoso_support.v")) {
+    setActiveResources(i);
+    return;
+  }
+  renderAllTrees();
 }
 
-// "resources" is a pseudo-tab (active === "res"): reveals the Yosys estimate UI in the same content area.
-function selectResources() {
-  active = "res";
-  showResources();
-  renderTabs();
+// --- selection: Resources target (.v only) --------------------------------------------------------
+
+function refreshResourceTargetChip() {
+  const inputs = deriveRouteInputs();
+  if (inputs) {
+    $("res-target").className = "target";
+    const note = inputs.support ? "+ holoso_support.v" : "(no sibling holoso_support.v)";
+    $("res-target").textContent = `${activeResourcesFile().path} ${note}`;
+    $("estimate").disabled = busy;
+    $("route").disabled = busy;
+  } else {
+    $("res-target").className = "target empty";
+    $("res-target").textContent = "no .v selected";
+    $("estimate").disabled = true;
+    $("route").disabled = true;
+  }
 }
 
-function renderTabs() {
-  const host = $("out-tabs");
-  host.innerHTML = "";
-  if (files.length === 0) return;
-  files.forEach((f, i) => {
-    const b = document.createElement("button");
-    b.textContent = f.path;
-    b.title = f.path;
-    if (i === active) b.classList.add("active");
-    b.onclick = () => selectTab(i);
-    host.appendChild(b);
-  });
-  // The resources pseudo-tab lives at the end of the strip so the natural reading order is
-  // "what the script wrote" first, then "how would this place on hardware" last.
-  const rb = document.createElement("button");
-  rb.textContent = "resources";
-  rb.title = "in-browser Yosys estimate / ECP5 place-and-route on the active .v tab";
-  if (active === "res") rb.classList.add("active");
-  rb.onclick = () => selectResources();
-  host.appendChild(rb);
-
-  const onFile = typeof active === "number" && !!files[active];
-  $("download").disabled = !onFile;
-  $("download-all").disabled = files.length === 0;
+function setActiveResources(i) {
+  if (i < 0 || !files[i] || files[i].ext !== "v") return;
+  activeResources = i;
+  refreshResourceTargetChip();
+  renderAllTrees();
 }
 
-// The Estimate/Route buttons operate on whichever .v the user is looking at; falling back to the first .v
-// keeps a sensible default when they're parked on the report or testbench tab. holoso_support.v is the
-// sibling RTL the synthesizer always co-emits, so pick it from the same directory as the chosen .v.
-function activeVerilogFile() {
-  if (typeof active === "number" && files[active]?.ext === "v") return files[active];
-  for (const f of files) if (f.ext === "v" && !f.path.endsWith("holoso_support.v")) return f;
-  for (const f of files) if (f.ext === "v") return f;
-  return null;
+function activeResourcesFile() {
+  return activeResources >= 0 ? files[activeResources] : null;
 }
 
 function deriveRouteInputs() {
-  const f = activeVerilogFile();
-  if (!f) return null;
+  const f = activeResourcesFile();
+  if (!f || f.ext !== "v") return null;
   const slash = f.path.lastIndexOf("/");
   const dir = slash >= 0 ? f.path.slice(0, slash) : "";
   const supportPath = dir ? `${dir}/holoso_support.v` : "holoso_support.v";
@@ -154,6 +257,8 @@ function deriveRouteInputs() {
   const top = f.path.slice(slash + 1).replace(/\.v$/, "");
   return { top, verilog: f.content, support: support?.content || "" };
 }
+
+// --- demo / worker / run flow --------------------------------------------------------------------
 
 let examples = [];
 
@@ -212,12 +317,21 @@ worker.onmessage = (e) => {
   }
 };
 
-// Initial tab pick after a successful run: prefer the last .html (deepest report, e.g. the wide e8m36 config
-// in ekf1_stateful), else the last .v, else the first emitted file. Empty file list -> just show stdout.
-function pickInitialTab(files) {
+// Initial picks after a successful run. Output prefers the last .html (the deepest report; e.g. the
+// wide e8m36 variant in ekf1_stateful). Resources prefers the last non-support .v from the same run
+// so the two views show "the same" pipeline by default.
+function pickInitialOutput(files) {
   for (let i = files.length - 1; i >= 0; i--) if (files[i].kind === "html") return i;
   for (let i = files.length - 1; i >= 0; i--) if (files[i].ext === "v") return i;
   return files.length > 0 ? 0 : -1;
+}
+
+function pickInitialResources(files) {
+  for (let i = files.length - 1; i >= 0; i--) {
+    if (files[i].ext === "v" && !files[i].path.endsWith("holoso_support.v")) return i;
+  }
+  for (let i = files.length - 1; i >= 0; i--) if (files[i].ext === "v") return i;
+  return -1;
 }
 
 function onResult(jsonStr) {
@@ -243,19 +357,23 @@ function onResult(jsonStr) {
       mode: extToMode(f.ext),
       encoding: f.encoding,
     }));
-    const tab = pickInitialTab(files);
-    const haveVerilog = files.some((f) => f.ext === "v");
-    $("estimate").disabled = !haveVerilog;
-    $("route").disabled = !haveVerilog;
-    if (tab >= 0) {
-      selectTab(tab);
+    treeRoot = buildTree(files);
+    $("download-all").disabled = files.length === 0;
+
+    const oi = pickInitialOutput(files);
+    const ri = pickInitialResources(files);
+    activeOutput = -1;
+    activeResources = -1;
+    if (ri >= 0) setActiveResources(ri);
+    if (oi >= 0) {
+      setActiveOutput(oi);
     } else {
-      $("out-tabs").innerHTML = "";
       showText();
       out.setValue("// script ran but emitted no files — see log for stdout/stderr", -1);
       $("download").disabled = true;
-      $("download-all").disabled = true;
     }
+    renderAllTrees();
+    refreshResourceTargetChip();
     logMsg(`ran ${currentFilename} · ${files.length} file${files.length === 1 ? "" : "s"} emitted`, "ok");
   } else {
     switchView("input");
@@ -307,6 +425,8 @@ $("run").onclick = () => {
   out.resize();
 };
 
+// --- downloads ------------------------------------------------------------------------------------
+
 function triggerDownload(name, blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -328,7 +448,7 @@ function activeFileBlob(f) {
 }
 
 $("download").onclick = () => {
-  const f = files[active];
+  const f = files[activeOutput];
   if (!f) return;
   const leaf = f.path.split("/").pop();
   triggerDownload(leaf, activeFileBlob(f));
@@ -364,6 +484,8 @@ $("download-all").onclick = async () => {
   }
 };
 
+// --- yosys / nextpnr resource estimate ------------------------------------------------------------
+
 const ARCH_LABEL = { generic: "generic gates", ecp5: "Lattice ECP5", xilinx: "Xilinx 7-series", ice40: "Lattice iCE40" };
 
 const ECP5_PKGS = {
@@ -391,8 +513,6 @@ let yosysWorker = null;
 let busy = false;
 let yosysReady = false;
 
-const RES_HINT = '<span class="dim">run a script that emits a .v file, then estimate gate/FPGA resources</span>';
-
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 }
@@ -414,9 +534,7 @@ function renderResources(m) {
 
 function finishResources() {
   busy = false;
-  const haveVerilog = files.some((f) => f.ext === "v");
-  $("estimate").disabled = !haveVerilog;
-  $("route").disabled = !haveVerilog;
+  refreshResourceTargetChip();
 }
 
 function renderPnr(m) {

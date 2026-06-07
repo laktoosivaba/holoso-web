@@ -29,7 +29,6 @@ h1 { font-size: 1em; margin: 0; font-weight: 600; }
 header .sub { color: #888; font-size: 0.85em; }
 .pane { border: 1px solid var(--bd); border-radius: 4px; margin: 0; overflow: hidden; background: white; flex: 0 0 auto; }
 .pane.fill { display: flex; flex-direction: column; min-height: 0; }
-#output-pane { flex: 1 1 0; }
 #src-pane { flex: 1 1 0; }
 .maintabs { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
 .maintabs .grow { flex: 1; }
@@ -44,15 +43,49 @@ header .sub { color: #888; font-size: 0.85em; }
   font-weight: 600; color: #555; display: flex; align-items: center; gap: 6px;
 }
 .pane > h2 .grow { flex: 1; }
-#src-editor, #out-editor, #out-frame, #out-resources { flex: 1 1 0; height: auto; min-height: 0; }
+#src-editor, #out-editor, #out-frame { flex: 1 1 0; height: auto; min-height: 0; }
 #out-frame { width: 100%; border: 0; background: white; display: none; }
-#out-resources { display: none; flex-direction: column; }
+
+/* Output / Resources views share a "tree | preview" split. The tree pane is fixed-width on the left,
+   the preview pane (editor/iframe in Output; restoolbar + report in Resources) takes the rest. */
+.split { display: flex; flex: 1 1 0; min-height: 0; gap: 8px; }
+.tree-pane {
+  flex: 0 0 260px; display: flex; flex-direction: column;
+  border: 1px solid var(--bd); border-radius: 4px; background: white; overflow: hidden;
+}
+.tree-pane > h2 { flex: 0 0 auto; }
+.tree {
+  flex: 1 1 0; overflow: auto; padding: 4px 0; font-size: 0.85em; min-height: 0;
+}
+.tree:empty::before {
+  content: "no files yet"; display: block; padding: 6px 12px; color: #999; font-style: italic;
+}
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree li { margin: 0; padding: 0; }
+.tree .dir, .tree .file {
+  display: flex; align-items: center; gap: 4px; padding: 2px 6px 2px 4px;
+  cursor: pointer; user-select: none; white-space: nowrap;
+}
+.tree .dir:hover, .tree .file:hover:not(.disabled) { background: var(--bg-alt); }
+.tree .file.active { background: var(--accent); color: white; }
+.tree .file.disabled { color: #aaa; cursor: not-allowed; }
+.tree .chev { display: inline-block; width: 12px; color: #888; flex: 0 0 12px; }
+.tree .icon { width: 14px; text-align: center; flex: 0 0 14px; color: #888; }
+.tree .file.active .icon { color: rgba(255, 255, 255, 0.85); }
+.tree .name { overflow: hidden; text-overflow: ellipsis; }
+.preview-pane { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--bd); border-radius: 4px; overflow: hidden; }
+
 .restoolbar {
   display: flex; gap: 10px; align-items: center; padding: 6px 10px; flex: 0 0 auto;
   background: var(--bg); border-bottom: 1px solid var(--bd); flex-wrap: wrap;
 }
 .restoolbar .sep { width: 1px; align-self: stretch; background: var(--bd); margin: 0 2px; }
-#resources { flex: 1 1 0; min-height: 0; }
+.restoolbar .target {
+  font-size: 0.8em; color: #555; padding: 2px 8px; border: 1px solid var(--bd);
+  border-radius: 3px; background: white;
+}
+.restoolbar .target.empty { color: #999; font-style: italic; }
+#resources { flex: 1 1 0; min-height: 0; padding: 8px 10px; font-size: 0.85em; overflow: auto; }
 button {
   padding: 5px 12px; font: inherit; font-size: 0.9em; cursor: pointer;
   border: 1px solid #999; background: white; color: #222; border-radius: 3px;
@@ -61,13 +94,6 @@ button:hover:not(:disabled) { background: var(--bg-alt); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: var(--accent); color: white; border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent-hov); border-color: var(--accent-hov); }
-.tabs {
-  display: flex; padding: 4px 8px; gap: 4px; background: var(--bg);
-  border-bottom: 1px solid var(--bd); min-height: 32px; align-items: center;
-}
-.tabs:empty::before { content: "no output yet"; color: #999; font-style: italic; }
-.tabs button { padding: 3px 9px; font-size: 0.8em; }
-.tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
 .controls { display: flex; gap: 14px; align-items: center; margin: 0 4px; flex-wrap: wrap; flex: 0 0 auto; }
 .controls label { display: flex; align-items: center; gap: 5px; }
 .controls input[type=number] {
@@ -86,17 +112,16 @@ select {
 #log .err { color: var(--log-err); }
 #log .ok  { color: var(--log-ok); }
 #log .dim { color: var(--log-dim); }
-.resbody { padding: 8px 10px; font-size: 0.85em; overflow: auto; }
-.resbody .dim { color: #999; }
-.resbody .err { color: #c0392b; white-space: pre-wrap; }
-.resbody .head { margin-bottom: 6px; }
-.resbody .head b { font-size: 1.2em; }
-.resbody .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-.resbody .chip { padding: 2px 8px; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg); }
-.resbody table { border-collapse: collapse; margin-top: 4px; }
-.resbody td { padding: 1px 12px 1px 0; }
-.resbody td.n { text-align: right; color: var(--accent); font-variant-numeric: tabular-nums; }
-.resbody .warn { color: #b7791f; margin-top: 6px; white-space: pre-wrap; }
+#resources .dim { color: #999; }
+#resources .err { color: #c0392b; white-space: pre-wrap; }
+#resources .head { margin-bottom: 6px; }
+#resources .head b { font-size: 1.2em; }
+#resources .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+#resources .chip { padding: 2px 8px; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg); }
+#resources table { border-collapse: collapse; margin-top: 4px; }
+#resources td { padding: 1px 12px 1px 0; }
+#resources td.n { text-align: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+#resources .warn { color: #b7791f; margin-top: 6px; white-space: pre-wrap; }
 </style>
 
 <header>
@@ -106,7 +131,8 @@ select {
 
 <nav class=maintabs id=main-tabs>
   <button id=tab-input class=active>Python input</button>
-  <button id=tab-output>Output &amp; resources</button>
+  <button id=tab-output>Output</button>
+  <button id=tab-resources>Resources</button>
   <span class=grow></span>
   <span class=sub id=engine>starting engine…</span>
 </nav>
@@ -128,12 +154,33 @@ select {
 </div>
 
 <div class=view id=view-output>
-  <div class="pane fill" id=output-pane>
-    <div class=tabs id=out-tabs></div>
-    <div id=out-editor class="editor short"></div>
-    <iframe id=out-frame class="editor short" sandbox="allow-scripts" title="synthesis report"></iframe>
-    <div id=out-resources>
+  <div class=split>
+    <div class=tree-pane>
+      <h2>
+        <span>files</span>
+        <span class=grow></span>
+        <button id=download disabled title="download the file selected in the tree">Download</button>
+        <button id=download-all disabled title="all generated files + the Kulibin support RTL, as one .tar.gz">Bundle</button>
+      </h2>
+      <div id=output-tree class=tree></div>
+    </div>
+    <div class=preview-pane id=output-preview>
+      <div id=out-editor class="editor short"></div>
+      <iframe id=out-frame class="editor short" sandbox="allow-scripts" title="emitted artifact"></iframe>
+    </div>
+  </div>
+</div>
+
+<div class=view id=view-resources>
+  <div class=split>
+    <div class=tree-pane>
+      <h2><span>files</span><span class=grow></span><span class=sub style="font-weight:400">.v only</span></h2>
+      <div id=resources-tree class=tree></div>
+    </div>
+    <div class=preview-pane>
       <div class=restoolbar>
+        <span id=res-target class="target empty">no .v selected</span>
+        <span class=sep></span>
         <label>target
           <select id=arch title="synthesis target for the resource estimate">
             <option value=generic>generic (gates)</option>
@@ -142,7 +189,7 @@ select {
             <option value=ice40>Lattice iCE40</option>
           </select>
         </label>
-        <button id=estimate disabled title="run Yosys in your browser on the generated Verilog (downloads ~50 MB on first use)">Estimate</button>
+        <button id=estimate disabled title="run Yosys in your browser on the selected .v (downloads ~50 MB on first use)">Estimate</button>
         <span class=sep></span>
         <label>ECP5
           <select id=ecp5-die title="ECP5 device — logic / DSP / BRAM capacity">
@@ -155,16 +202,10 @@ select {
         <label>package
           <select id=ecp5-pkg title="package — pin count / number of I/O pads"></select>
         </label>
-        <button id=route disabled title="place &amp; route on Lattice ECP5 in your browser for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
+        <button id=route disabled title="place &amp; route on Lattice ECP5 for real Fmax + post-route utilization (downloads ~170 MB of chipdb on first use)">Route</button>
       </div>
-      <div id=resources class=resbody><span class=dim>synthesize a kernel, then estimate gate/FPGA resources</span></div>
+      <div id=resources><span class=dim>run a script that emits a .v file, then estimate gate/FPGA resources</span></div>
     </div>
-    <h2>
-      <span>output</span>
-      <span class=grow></span>
-      <button id=download disabled>Download</button>
-      <button id=download-all disabled title="all generated files + the Kulibin support RTL, as one .tar.gz">Download bundle</button>
-    </h2>
   </div>
 </div>
 
