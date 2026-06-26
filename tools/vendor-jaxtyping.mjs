@@ -1,6 +1,6 @@
 // Download the pure-Python wheels for jaxtyping + its runtime deps from PyPI and stash them under wheels/ so the
 // worker installs them via emfs:/ instead of reaching back to PyPI on every page load. Mirrors the same self-host
-// invariant as vendor-pyodide/vendor-yosys/vendor-nextpnr/vendor-examples: nothing the runtime needs
+// invariant as vendor-pyodide/vendor-yosys/vendor-nextpnr/vendor-holoso: nothing the runtime needs
 // must come from a CDN at load time.
 //
 // jaxtyping ~0.3 is required by upstream holoso examples that use Float64[ndarray, "..."] annotations (currently
@@ -26,8 +26,8 @@ function pickWheel(release) {
 
 await mkdir(OUT, { recursive: true });
 
-// Clear any previously-vendored extra wheels so a version bump on PyPI removes the old one. The holoso wheel
-// is named in `make wheel` and lives separately; we identify our extras by the manifest we wrote last time.
+// Clear any previously-vendored extra wheels so a version bump on PyPI removes the old one. The Holoso wheel
+// is handled by vendor-holoso; we identify our extras by the manifest we wrote last time.
 const manifestPath = OUT + "extra-manifest.json";
 let prev = [];
 try {

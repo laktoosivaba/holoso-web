@@ -299,27 +299,39 @@ function showEditorPane() {
   ed.resize();  // Ace lays out at zero size while display:none, so re-measure on reveal.
 }
 
-// README.md is fetched and rendered once, then cached. It is our own shipped file, so marked's HTML
-// output is injected directly (no sanitization). External links open in a new tab so following one
-// doesn't navigate away from the app.
+const HOLOSO_README_PATH = "holoso/README.md";
+const HOLOSO_DOC_BASE = "holoso/";
+
+function rebaseHolosoDocUrl(url) {
+  if (!url || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(url)) return url;
+  return HOLOSO_DOC_BASE + url.replace(/^\.\//, "");
+}
+
+// The upstream Holoso README is fetched and rendered once, then cached. It is vendored from the same
+// release as the wheel, so marked's HTML output is injected directly (no sanitization). Links open in a
+// new tab so following one doesn't navigate away from the app.
 let readmeHtml = null;
 async function renderReadme() {
   const host = $("readme-view");
   if (readmeHtml !== null) { host.innerHTML = readmeHtml; return; }
   host.innerHTML = '<p class="readme-dim">loading README…</p>';
   try {
-    const md = await (await fetch("README.md")).text();
+    const md = await (await fetch(HOLOSO_README_PATH)).text();
     const { marked } = await import("./marked.esm.js");
-    readmeHtml = marked.parse(md);
+    host.innerHTML = marked.parse(md);
   } catch (e) {
-    host.innerHTML = `<p class="readme-err">couldn't load README.md: ${escapeHtml(String(e?.message || e))}</p>`;
+    host.innerHTML = `<p class="readme-err">couldn't load ${HOLOSO_README_PATH}: ${escapeHtml(String(e?.message || e))}</p>`;
     return;
   }
-  host.innerHTML = readmeHtml;
+  for (const el of host.querySelectorAll("[src]")) {
+    el.setAttribute("src", rebaseHolosoDocUrl(el.getAttribute("src")));
+  }
   for (const a of host.querySelectorAll("a[href]")) {
+    a.setAttribute("href", rebaseHolosoDocUrl(a.getAttribute("href")));
     a.target = "_blank";
     a.rel = "noopener noreferrer";
   }
+  readmeHtml = host.innerHTML;
 }
 
 // The default landing input. Shows the rendered README in place of the editor and pins the matching
@@ -383,7 +395,7 @@ function renderInputTree() {
   const ul = document.createElement("ul");
   ul.appendChild(inputRow({
     label: "README.md",
-    title: "Project README — start here",
+    title: "Holoso README",
     active: inputMode === "readme",
     onClick: showReadme,
   }));

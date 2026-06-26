@@ -1,8 +1,8 @@
 // Regression test for the in-browser script runner (driver.py): boots holoso in Node-Pyodide exactly as
 // the worker does, then exercises run_script against every demo plus the error / IO / bad-request paths.
-// Uses the freshly built SYNTH/dist wheel (not the vendored one) so a bad build is caught here.
+// Uses the vendored Holoso release wheel, matching the browser runtime.
 
-import { SYNTH, harness, loadDemos, bootHoloso, runScript } from "./shared.mjs";
+import { harness, loadDemos, bootHoloso, runScript } from "./shared.mjs";
 
 const { log, check, done } = harness();
 
@@ -14,7 +14,7 @@ const { log, check, done } = harness();
 const MIN_SYNTHESIZING_DEMOS = 12;
 
 try {
-  const py = await bootHoloso({ wheelDir: `${SYNTH}/dist` });
+  const py = await bootHoloso();
 
   log("\n=== demo kernels load + run ===");
   const demos = loadDemos();
