@@ -1,29 +1,29 @@
-SYNTH     ?= ../holoso-synth
-STATIC    := index.html app.js worker.js driver.py closure.js yosys-worker.js yosys-job.js nanotar.js marked.esm.js README.md favicon.png
+STATIC    := index.html app.js worker.js driver.py closure.js yosys-worker.js yosys-job.js nanotar.js marked.esm.js README.md README_WEB.md favicon.png
 DIST      := dist
 PORT      ?= 8137
 YOSYS_GEN := tools/node_modules/@yowasp/yosys/gen
 NPNR_GEN  := tools/node_modules/@yowasp/nextpnr-ecp5/gen
+export HOLOSO_VERSION
+export HOLOSO_REPO
+export HOLOSO_MAIN
 
-.PHONY: dist wheel node-deps vendor vendor-yosys vendor-nextpnr vendor-examples vendor-jaxtyping test serve clean image deploy
+.PHONY: dist vendor-holoso node-deps vendor vendor-yosys vendor-nextpnr vendor-jaxtyping test serve clean image deploy
 
-dist: wheel vendor vendor-yosys vendor-nextpnr vendor-examples vendor-jaxtyping
+dist: vendor-holoso vendor vendor-yosys vendor-nextpnr vendor-jaxtyping
 	node tools/wheels-manifest.mjs
 	rm -rf $(DIST)
-	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/demos
+	mkdir -p $(DIST)/wheels $(DIST)/pyodide $(DIST)/yosys $(DIST)/nextpnr-ecp5 $(DIST)/demos $(DIST)/holoso
 	cp $(STATIC) $(DIST)/
 	cp wheels/*.whl wheels/manifest.json $(DIST)/wheels/
 	cp -R pyodide/. $(DIST)/pyodide/
 	cp -R yosys/. $(DIST)/yosys/
 	cp -R nextpnr-ecp5/. $(DIST)/nextpnr-ecp5/
 	cp -R demos/. $(DIST)/demos/
+	cp -R holoso/. $(DIST)/holoso/
 	@echo "assembled $(DIST)/ ($$(du -sh $(DIST) | cut -f1))"
 
-wheel:
-	cd $(SYNTH) && uv build --wheel
-	mkdir -p wheels
-	rm -f wheels/holoso-*.whl
-	cp $(SYNTH)/dist/holoso-*.whl wheels/
+vendor-holoso:
+	node tools/vendor-holoso.mjs
 
 node-deps:
 	cd tools && npm ci --no-audit --no-fund
@@ -40,13 +40,10 @@ vendor-nextpnr: node-deps
 	rm -rf nextpnr-ecp5 && mkdir -p nextpnr-ecp5
 	cp -R $(NPNR_GEN)/. nextpnr-ecp5/
 
-vendor-examples:
-	node tools/vendor-examples.mjs $(SYNTH)
-
 vendor-jaxtyping:
 	node tools/vendor-jaxtyping.mjs
 
-test: wheel vendor vendor-examples vendor-jaxtyping
+test: vendor-holoso vendor vendor-jaxtyping
 	cd tools && npm run test && npm run vendor:check && npm run test:closure
 
 serve:
@@ -59,4 +56,4 @@ deploy:
 	act -W .github/workflows/deploy.yml
 
 clean:
-	rm -rf $(DIST) wheels/*.whl wheels/extra-manifest.json wheels/manifest.json pyodide yosys nextpnr-ecp5 demos tools/node_modules
+	rm -rf $(DIST) wheels/*.whl wheels/extra-manifest.json wheels/manifest.json pyodide yosys nextpnr-ecp5 demos holoso tools/node_modules

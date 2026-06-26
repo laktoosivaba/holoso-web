@@ -6,23 +6,15 @@ on:
       tag:
         description: "Image tag (pushed to the registry configured in vars.IMAGE)"
         default: dev
-      synth_ref:
-        description: "Zubax/holoso ref to build the wheel from"
-        default: main
+      holoso_version:
+        description: "Holoso release tag to vendor; leave empty for latest"
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check out holoso-synth (wheel source)
-        uses: actions/checkout@v4
-        with:
-          repository: Zubax/holoso
-          ref: ${{ inputs.synth_ref }}
-          path: holoso-synth
-          submodules: recursive
 
       - uses: docker/setup-buildx-action@v3
         with:
@@ -36,7 +28,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          build-contexts: |
-            holoso-synth=holoso-synth
+          build-args: |
+            HOLOSO_VERSION=${{ inputs.holoso_version }}
           provenance: false
           outputs: type=image,name=${{ vars.IMAGE }}:${{ inputs.tag }},push=true,oci-mediatypes=true

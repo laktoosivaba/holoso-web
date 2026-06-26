@@ -6,7 +6,6 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const WEB = fileURLToPath(new URL("../", import.meta.url));
-export const SYNTH = (process.env.SYNTH || WEB + "../holoso-synth").replace(/\/$/, "");
 export const DEMOS = WEB + "demos";
 export const WHEELS = WEB + "wheels";              // vendored wheels: holoso + jaxtyping/deps (extra-manifest)
 export const DRIVER = WEB + "driver.py";
@@ -47,7 +46,7 @@ export function loadDemos() {
 // Boot Pyodide, install the holoso wheel + the vendored extra wheels from the in-memory FS (never PyPI),
 // and exec driver.py so run_script is defined — mirroring worker.js init(). `indexURL` boots from a
 // specific Pyodide dir (vendor-check passes the vendored one); `wheelDir` is where the holoso wheel is
-// taken from (driver_test points at the freshly built SYNTH/dist; default is the vendored wheels/). The
+// taken from (default is the vendored wheels/). The
 // extras always come from the vendored wheels/ via extra-manifest.json.
 export async function bootHoloso({ indexURL, wheelDir = WHEELS } = {}) {
   const { loadPyodide } = await import("pyodide");
@@ -56,7 +55,13 @@ export async function bootHoloso({ indexURL, wheelDir = WHEELS } = {}) {
   const holoso = holosoWheel(wheelDir);
   const names = [holoso.name];
   py.FS.writeFile("/" + holoso.name, readFileSync(holoso.path));
-  for (const name of JSON.parse(readFileSync(`${WHEELS}/extra-manifest.json`, "utf8"))) {
+  let extras = [];
+  try {
+    extras = JSON.parse(readFileSync(`${WHEELS}/extra-manifest.json`, "utf8"));
+  } catch {
+    extras = [];
+  }
+  for (const name of extras) {
     py.FS.writeFile("/" + name, readFileSync(`${WHEELS}/${name}`));
     names.push(name);
   }

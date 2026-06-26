@@ -6,18 +6,15 @@
 // reaches inside that one file -- a divider design must reach the divider cores, an add/mul design must not.
 
 import { closure } from "../closure.js";
-import { execFileSync } from "node:child_process";
-import { SYNTH, harness } from "./shared.mjs";
+import { bootHoloso, harness } from "./shared.mjs";
 
-const { check, done } = harness();
+const { log, check, done } = harness();
 
 // Assemble holoso_support.v exactly as the runtime does: it is built in memory from the synth package's
 // rtl/ sources, so we ask the package itself for the canonical bytes rather than reading a static file.
-const support = execFileSync(
-  "python3",
-  ["-c", "import sys; from holoso._backend.verilog._support import support_files; sys.stdout.write(support_files()['holoso_support.v'])"],
-  { cwd: SYNTH, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
-);
+log("booting Pyodide + vendored Holoso for support RTL ...");
+const py = await bootHoloso();
+const support = py.runPython("from holoso._backend.verilog._support import support_files; support_files()['holoso_support.v']");
 const library = { "holoso_support.v": support };
 
 const wrap = (name, body) => `module ${name} #(parameter WEXP=8, parameter WMAN=24) ();\n${body}\nendmodule\n`;

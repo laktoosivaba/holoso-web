@@ -62,7 +62,7 @@ body[data-view=resources] .input-only { display: none; }
 #out-frame { width: 100%; border: 0; background: white; display: none; }
 
 /* README onboarding pane: rendered Markdown shown in place of the editor when README.md is the selected
-   input. The content is our own shipped file, so app.js injects marked's HTML directly (no sanitization).
+   input. The content is vendored from the Holoso release, so app.js injects marked's HTML directly.
    Hidden by default; showReadme()/showEditorPane() in app.js toggle it against #src-editor. */
 #readme-view {
   flex: 1 1 0; min-height: 0; overflow: auto; display: none; padding: 18px 26px;
