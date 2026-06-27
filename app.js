@@ -299,52 +299,61 @@ function showEditorPane() {
   ed.resize();  // Ace lays out at zero size while display:none, so re-measure on reveal.
 }
 
-const HOLOSO_README_PATH = "holoso/README.md";
-const HOLOSO_DOC_BASE = "holoso/";
+// Two onboarding docs render in the same pane: the upstream Holoso engine README (vendored under holoso/
+// from the same release as the wheel — the default landing) and README_WEB.md, this web front-end's own
+// guide. `base` rebases a doc's relative links/images: the Holoso README references its repo-relative docs,
+// so its links are pinned under holoso/; README_WEB ships at the site root and links out absolutely, so it
+// needs no rebasing. Both are trusted (vendored release / our own file), so marked's HTML is injected raw.
+const README_DOCS = {
+  holoso: { label: "README.md", title: "Holoso README", path: "holoso/README.md", base: "holoso/" },
+  web: { label: "README_WEB.md", title: "Using this web front-end", path: "README_WEB.md", base: "" },
+};
+let activeReadme = "holoso";
 
-function rebaseHolosoDocUrl(url) {
-  if (!url || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(url)) return url;
-  return HOLOSO_DOC_BASE + url.replace(/^\.\//, "");
+function rebaseDocUrl(url, base) {
+  if (!base || !url || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(url)) return url;
+  return base + url.replace(/^\.\//, "");
 }
 
-// The upstream Holoso README is fetched and rendered once, then cached. It is vendored from the same
-// release as the wheel, so marked's HTML output is injected directly (no sanitization). Links open in a
-// new tab so following one doesn't navigate away from the app.
-let readmeHtml = null;
-async function renderReadme() {
+// Each doc is fetched + rendered once, then cached by key. Links open in a new tab so following one
+// doesn't navigate away from the app.
+const readmeCache = {};
+async function renderReadme(key) {
   const host = $("readme-view");
-  if (readmeHtml !== null) { host.innerHTML = readmeHtml; return; }
+  const doc = README_DOCS[key];
+  if (readmeCache[key] != null) { host.innerHTML = readmeCache[key]; return; }
   host.innerHTML = '<p class="readme-dim">loading README…</p>';
   try {
-    const md = await (await fetch(HOLOSO_README_PATH)).text();
+    const md = await (await fetch(doc.path)).text();
     const { marked } = await import("./marked.esm.js");
     host.innerHTML = marked.parse(md);
   } catch (e) {
-    host.innerHTML = `<p class="readme-err">couldn't load ${HOLOSO_README_PATH}: ${escapeHtml(String(e?.message || e))}</p>`;
+    host.innerHTML = `<p class="readme-err">couldn't load ${doc.path}: ${escapeHtml(String(e?.message || e))}</p>`;
     return;
   }
   for (const el of host.querySelectorAll("[src]")) {
-    el.setAttribute("src", rebaseHolosoDocUrl(el.getAttribute("src")));
+    el.setAttribute("src", rebaseDocUrl(el.getAttribute("src"), doc.base));
   }
   for (const a of host.querySelectorAll("a[href]")) {
-    a.setAttribute("href", rebaseHolosoDocUrl(a.getAttribute("href")));
+    a.setAttribute("href", rebaseDocUrl(a.getAttribute("href"), doc.base));
     a.target = "_blank";
     a.rel = "noopener noreferrer";
   }
-  readmeHtml = host.innerHTML;
+  readmeCache[key] = host.innerHTML;
 }
 
-// The default landing input. Shows the rendered README in place of the editor and pins the matching
-// tree row active; Run is disabled while it's up.
-function showReadme() {
+// Shows a rendered README doc in place of the editor and pins the matching tree row active; Run is
+// disabled while one is up. Defaults to the Holoso README (the landing doc).
+function showReadme(key = "holoso") {
   inputMode = "readme";
-  $("src-filename").textContent = "README.md";
+  activeReadme = key;
+  $("src-filename").textContent = README_DOCS[key].label;
   // Explicit "block", not "" — the base rule is display:none, so clearing the inline style would fall
   // back to that and leave the pane blank.
   $("readme-view").style.display = "block";
   $("src-editor").style.display = "none";
   ed.session.clearAnnotations();
-  renderReadme();
+  renderReadme(key);
   renderInputTree();
   syncRunEnabled();
 }
@@ -385,20 +394,23 @@ function loadingRow(text) {
   return li;
 }
 
-// The input tree pins README.md at the top (the default doc), then lists every demo kernel with the same
-// row styling as the output trees so the visual language matches across all three tabs. Clicking a row
-// activates it (blue) and either shows the README or loads the demo's source + sibling extras. Until the
-// engine is ready the demos aren't loaded yet, so a loading row stands in for them.
+// The input tree pins the two README docs at the top (Holoso's, then this front-end's), then lists every
+// demo kernel with the same row styling as the output trees so the visual language matches across all
+// three tabs. Clicking a row activates it (blue) and either shows the matching README or loads the demo's
+// source + sibling extras. Until the engine is ready the demos aren't loaded yet, so a loading row stands
+// in for them.
 function renderInputTree() {
   const host = $("input-tree");
   host.innerHTML = "";
   const ul = document.createElement("ul");
-  ul.appendChild(inputRow({
-    label: "README.md",
-    title: "Holoso README",
-    active: inputMode === "readme",
-    onClick: showReadme,
-  }));
+  for (const key of ["holoso", "web"]) {
+    ul.appendChild(inputRow({
+      label: README_DOCS[key].label,
+      title: README_DOCS[key].title,
+      active: inputMode === "readme" && activeReadme === key,
+      onClick: () => showReadme(key),
+    }));
+  }
   for (const ex of examples) {
     ul.appendChild(inputRow({
       label: ex.filename || `${ex.id}.py`,
