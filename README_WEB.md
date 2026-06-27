@@ -9,6 +9,8 @@ This is the web front-end for the [Holoso](https://github.com/Zubax/holoso) high
 (also on [PyPI](https://pypi.org/project/holoso/)) — the site behind
 [holoso.digital](https://holoso.digital).
 
+The front-end's own source lives at [holoso-web](https://github.com/laktoosivaba/holoso-web).
+
 ## Quick start
 
 1. **Pick a demo** from the file list on the left of the **Python input** tab — or just keep the one

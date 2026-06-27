@@ -31,6 +31,8 @@ body {
 header { display: flex; align-items: baseline; gap: 12px; margin: 0; }
 h1 { font-size: 1em; margin: 0; font-weight: 600; }
 header .sub { color: #888; font-size: 0.85em; }
+header .gh { margin-left: auto; color: #888; font-size: 0.85em; text-decoration: none; white-space: nowrap; }
+header .gh:hover { color: #555; text-decoration: underline; }
 .pane { border: 1px solid var(--bd); border-radius: 4px; margin: 0; overflow: hidden; background: white; flex: 0 0 auto; }
 .pane.fill { display: flex; flex-direction: column; min-height: 0; }
 #src-pane { flex: 1 1 0; }
@@ -192,6 +194,7 @@ select {
 <header>
   <h1>holoso</h1>
   <span class=sub>Simple high-level synthesis of portable Verilog from idiomatic Python</span>
+  <a class=gh href="https://github.com/Zubax/holoso" target=_blank rel="noopener noreferrer" title="Holoso on GitHub">GitHub ↗</a>
 </header>
 
 <nav class=maintabs id=main-tabs>
